@@ -8,9 +8,9 @@ from typing import Any
 from blacknode.node import Any as AnyPort
 from blacknode.node import Bool, Dict, Enum, Float, Image, List, Text, node
 
-from blacknode.pkg.blacknode_controllers.policy import policy_runtime
+from blacknode.pkg.blacknode_motion.policy import policy_runtime
 
-_CATEGORY = "Controllers"
+_CATEGORY = "Motion"
 
 
 def _dashboard(status: dict[str, Any]) -> str:

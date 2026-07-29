@@ -1,63 +1,60 @@
 [package]
-name = "blacknode-controllers"
-version = "0.3.2"
-description = "Generic motion, manipulation, arbitration, policy, and safety controllers for Blacknode."
+name = "blacknode-motion"
+version = "0.5.0"
+description = "Arm and base planning, trajectory generation, execution, policy, arbitration, and motion safety for Blacknode."
 requires-blacknode = ">=0.3.0"
-layer = "controllers"
+layer = "motion"
 component-mode = true
 
 [categories]
-"Controllers" = "#f43f5e"
+"Motion" = "#f97316"
 
-[components.joint-control]
-description = "Transport-neutral joint-space control contracts."
-default = true
-capabilities = ["controller.joint-control"]
+[components.core]
+description = "Motion ownership, priority, and command-arbitration contracts."
+default = false
+capabilities = ["motion.core", "motion.arbitration"]
 
-[components.joint-control.adapters.ros2]
-description = "Joint motion profiles, state, safe single-joint moves, manual move (teach), and live motion dashboards over ROS 2 transports."
+[components.arm]
+description = "Arm planning, trajectory generation, execution, and manipulation."
 default = true
-capabilities = ["adapter.controller.joint-control.ros2"]
-nodes = ["components/joint-control/adapters/ros2/nodes"]
-templates = ["components/joint-control/adapters/ros2/templates"]
+capabilities = ["motion.arm", "motion.arm.planning", "motion.arm.trajectory", "motion.arm.execution"]
+nodes = ["components/arm/trajectory/nodes"]
+node-types = ["JointMotionProfile"]
+
+[components.arm.adapters.ros2]
+description = "Arm state and command control surfaces over ROS 2 transports."
+default = true
+capabilities = ["adapter.motion.arm.ros2"]
+nodes = ["components/arm/adapters/ros2/nodes"]
+templates = ["components/arm/adapters/ros2/templates"]
 node-types = [
-  "JointMotionProfile", "ROS2JointSliders", "ROS2JointState", "ROS2ManualMove",
-  "ROS2MotionDashboard", "ROS2SetJoint"
+  "ROS2JointSliders", "ROS2JointState", "ROS2ManualMove",
+  "ROS2MotionDashboard", "ROS2SetJoint",
 ]
 
-[components.joint-control.adapters.ros2.dependencies]
+[components.arm.adapters.ros2.dependencies]
 requires = [{ package = "blacknode-ros2", component = "core", version = ">=0.5.6,<1.0.0" }]
 
-[components.mobile-base]
-description = "Transport-neutral mobile-base control contracts."
+[components.base]
+description = "Mobile-base planning, navigation-provider integration, and execution."
 default = false
-capabilities = ["controller.mobile-base"]
+capabilities = ["motion.base", "motion.base.planning", "motion.base.execution"]
 
-[components.mobile-base.adapters.ros2]
+[components.base.adapters.ros2]
 description = "Safety-gated mobile-base commands, scan checks, odometry, and stop over ROS 2 transports."
 default = false
-capabilities = ["adapter.controller.mobile-base.ros2"]
-nodes = ["components/mobile-base/adapters/ros2/nodes"]
-templates = ["components/mobile-base/adapters/ros2/templates"]
+capabilities = ["adapter.motion.base.ros2"]
+nodes = ["components/base/adapters/ros2/nodes"]
+templates = ["components/base/adapters/ros2/templates"]
 node-types = ["BaseSafetyGate", "ROS2BaseMove", "ROS2BaseStop", "ROS2LaserScanCheck", "ROS2OdomState"]
 
-[components.mobile-base.adapters.ros2.dependencies]
-requires = [{ package = "blacknode-ros2", component = "core", version = ">=0.2.0,<1.0.0" }]
-
-[components.nav2]
-description = "Navigation controller integration over stable navigation capabilities."
-default = false
-capabilities = ["controller.navigation"]
-
-[components.manipulation]
-description = "Kinematics and manipulation control contracts."
-default = false
-capabilities = ["controller.manipulation"]
+[components.base.adapters.ros2.dependencies]
+requires = [{ package = "blacknode-ros2", component = "rosbridge", version = ">=0.5.8,<1.0.0" }]
 
 [components.policy]
-description = "Learned-policy execution and lifecycle contracts."
+description = "Learned-policy motion planning, execution, and lifecycle contracts."
 default = true
-capabilities = ["controller.policy"]
+capabilities = ["motion.policy"]
 nodes = ["components/policy/nodes"]
 
 [components.policy.dependencies]
@@ -67,20 +64,15 @@ imports = ["numpy", "PIL"]
 [components.policy.adapters.ros2]
 description = "Safety-gated learned-policy lifecycle and ROS 2 execution."
 default = false
-capabilities = ["adapter.controller.policy.ros2"]
+capabilities = ["adapter.motion.policy.ros2"]
 nodes = ["components/policy/adapters/ros2/nodes"]
 templates = ["components/policy/adapters/ros2/templates"]
 node-types = ["PolicyRuntime", "PolicySafetyGate"]
 
 [components.policy.adapters.ros2.dependencies]
-requires = [{ package = "blacknode-ros2", component = "core", version = ">=0.2.0,<1.0.0" }]
+requires = [{ package = "blacknode-ros2", component = "rosbridge", version = ">=0.5.8,<1.0.0" }]
 
-[components.command-arbitration]
-description = "Deterministic ownership and priority arbitration for commands."
+[components.safety]
+description = "Motion freshness, limits, stop, and shutdown supervision."
 default = false
-capabilities = ["controller.command-arbitration"]
-
-[components.safety-supervisors]
-description = "Freshness, limits, stop, and shutdown supervision."
-default = false
-capabilities = ["controller.safety-supervision"]
+capabilities = ["motion.safety", "motion.safety-supervision"]

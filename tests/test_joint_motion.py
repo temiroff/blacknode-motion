@@ -1,4 +1,4 @@
-"""blacknode-controllers — joint-space control contracts (ROS 2 adapter).
+"""blacknode-motion — arm motion contracts and ROS 2 control surfaces.
 
 All tests run without rclpy/roslibpy and without a robot: transport helpers
 are monkeypatched, and the arming/clamping/dashboard logic is exercised pure.
@@ -15,13 +15,22 @@ import blacknode  # noqa: F401  triggers package discovery
 from blacknode.node import _NODE_REGISTRY
 from blacknode.packages import _import_nodes_module, _tag_new_package_nodes
 
-_ADAPTER_NODES = Path(__file__).resolve().parents[1] / "components" / "joint-control" / "adapters" / "ros2" / "nodes"
+_ARM_NODES = (
+    Path(__file__).resolve().parents[1]
+    / "components" / "arm" / "trajectory" / "nodes"
+)
+_ADAPTER_NODES = Path(__file__).resolve().parents[1] / "components" / "arm" / "adapters" / "ros2" / "nodes"
 _before = dict(_NODE_REGISTRY)
-_import_nodes_module("blacknode.pkg.blacknode_controllers.joint_control.adapters.ros2", _ADAPTER_NODES)
-_tag_new_package_nodes(_before, "blacknode-controllers", _ADAPTER_NODES, "joint-control", "ros2")
+_import_nodes_module("blacknode.pkg.blacknode_motion.arm", _ARM_NODES)
+_tag_new_package_nodes(_before, "blacknode-motion", _ARM_NODES, "arm")
+_before_adapter = dict(_NODE_REGISTRY)
+_import_nodes_module("blacknode.pkg.blacknode_motion.arm.adapters.ros2", _ADAPTER_NODES)
+_tag_new_package_nodes(
+    _before_adapter, "blacknode-motion", _ADAPTER_NODES, "arm", "ros2",
+)
 
-from blacknode.pkg.blacknode_controllers.joint_control.adapters.ros2 import joint_motion as jm
-from blacknode.pkg.blacknode_controllers.joint_control.adapters.ros2 import motion_profiles as mp
+from blacknode.pkg.blacknode_motion.arm import motion_profiles as mp
+from blacknode.pkg.blacknode_motion.arm.adapters.ros2 import joint_motion as jm
 from blacknode.pkg.blacknode_ros2 import ros2_native_runtime as nr
 from blacknode.pkg.blacknode_ros2 import rosbridge_runtime as rb
 
@@ -125,8 +134,8 @@ def test_joint_sliders_read_joints_and_move_only_when_armed(monkeypatch):
 def test_new_nodes_registered_with_category_and_package():
     for name in NEW_NODES:
         assert name in _NODE_REGISTRY, name
-        assert _NODE_REGISTRY[name]._bn_category == "Controllers"
-        assert _NODE_REGISTRY[name]._bn_package == "blacknode-controllers"
+        assert _NODE_REGISTRY[name]._bn_category == "Motion"
+        assert _NODE_REGISTRY[name]._bn_package == "blacknode-motion"
 
 
 # --- ROS2SetJoint / ROS2JointState ------------------------------------------------

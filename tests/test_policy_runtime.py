@@ -14,11 +14,11 @@ from blacknode.packages import _import_nodes_module, _tag_new_package_nodes
 _POLICY_NODES = Path(__file__).resolve().parents[1] / "components" / "policy" / "nodes"
 _ADAPTER_NODES = Path(__file__).resolve().parents[1] / "components" / "policy" / "adapters" / "ros2" / "nodes"
 _before = dict(_NODE_REGISTRY)
-_import_nodes_module("blacknode.pkg.blacknode_controllers.policy", _POLICY_NODES)
-_import_nodes_module("blacknode.pkg.blacknode_controllers.policy.adapters.ros2", _ADAPTER_NODES)
-_tag_new_package_nodes(_before, "blacknode-controllers", _ADAPTER_NODES, "policy", "ros2")
+_import_nodes_module("blacknode.pkg.blacknode_motion.policy", _POLICY_NODES)
+_import_nodes_module("blacknode.pkg.blacknode_motion.policy.adapters.ros2", _ADAPTER_NODES)
+_tag_new_package_nodes(_before, "blacknode-motion", _ADAPTER_NODES, "policy", "ros2")
 
-from blacknode.pkg.blacknode_controllers.policy import policy_runtime
+from blacknode.pkg.blacknode_motion.policy import policy_runtime
 
 
 def _artifact() -> dict:

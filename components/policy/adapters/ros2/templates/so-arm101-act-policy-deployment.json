@@ -8,9 +8,9 @@
     "template": true,
     "description": "Load a Blacknode ACT policy artifact, connect the calibrated SO-ARM101 follower and the same named camera streams used for training, preview continuously while disarmed, then arm, interrupt, or hand control back safely. Every motion path starts disarmed.",
     "color": "#2e9fe6",
-    "required_packages": ["blacknode-training", "blacknode-robot", "blacknode-perception", "blacknode-dataset", "blacknode-controllers", "blacknode-ros2"],
-    "required_components": ["blacknode-controllers/policy", "blacknode-ros2/core"],
-    "required_adapters": ["blacknode-controllers/policy@ros2"]
+    "required_packages": ["blacknode-training", "blacknode-robot", "blacknode-perception", "blacknode-dataset", "blacknode-motion", "blacknode-ros2"],
+    "required_components": ["blacknode-motion/policy", "blacknode-ros2/rosbridge"],
+    "required_adapters": ["blacknode-motion/policy@ros2"]
   },
   "node_meta": {
     "artifact_path": {

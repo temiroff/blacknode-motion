@@ -1,8 +1,9 @@
-"""blacknode-ros2 — mobile-base motion contracts.
+"""blacknode-motion — mobile-base motion contracts.
 
 All tests run without roslibpy and without a robot: network-touching helpers
 are monkeypatched, and the geometry/authorization logic is exercised pure.
 """
+import json
 import math
 import time
 from pathlib import Path
@@ -13,14 +14,13 @@ import blacknode  # noqa: F401  triggers package discovery
 from blacknode.node import _NODE_REGISTRY
 from blacknode.packages import _import_nodes_module, _tag_new_package_nodes
 
-_ADAPTER_NODES = Path(__file__).resolve().parents[1] / "components" / "mobile-base" / "adapters" / "ros2" / "nodes"
+_ADAPTER_NODES = Path(__file__).resolve().parents[1] / "components" / "base" / "adapters" / "ros2" / "nodes"
 _before = dict(_NODE_REGISTRY)
-_import_nodes_module("blacknode.pkg.blacknode_controllers.mobile_base.adapters.ros2", _ADAPTER_NODES)
-_tag_new_package_nodes(_before, "blacknode-controllers", _ADAPTER_NODES, "mobile-base", "ros2")
+_import_nodes_module("blacknode.pkg.blacknode_motion.base.adapters.ros2", _ADAPTER_NODES)
+_tag_new_package_nodes(_before, "blacknode-motion", _ADAPTER_NODES, "base", "ros2")
 
-from blacknode.pkg.blacknode_controllers.mobile_base.adapters.ros2 import base_motion as bm
+from blacknode.pkg.blacknode_motion.base.adapters.ros2 import base_motion as bm
 from blacknode.pkg.blacknode_ros2 import rosbridge_runtime as rb
-from blacknode.pkg.blacknode_ros2 import rosbridge_topics as bt
 
 NEW_NODES = [
     "BaseSafetyGate",
@@ -40,8 +40,18 @@ def _fresh_authorization(**overrides):
 def test_new_nodes_registered_with_category_and_package():
     for name in NEW_NODES:
         assert name in _NODE_REGISTRY, name
-        assert _NODE_REGISTRY[name]._bn_category == "Controllers"
-        assert _NODE_REGISTRY[name]._bn_package == "blacknode-controllers"
+        assert _NODE_REGISTRY[name]._bn_category == "Motion"
+        assert _NODE_REGISTRY[name]._bn_package == "blacknode-motion"
+
+
+def test_base_template_validates():
+    from blacknode.workflow import validate_workflow
+
+    template_dir = _ADAPTER_NODES.parents[0] / "templates"
+    for path in sorted(template_dir.glob("*.json")):
+        workflow = json.loads(path.read_text(encoding="utf-8"))
+        report = validate_workflow(workflow)
+        assert report.ok, f"{path.name}: {report.to_dict()}"
 
 
 # --- BaseSafetyGate ---------------------------------------------------------------
@@ -219,47 +229,3 @@ def test_parse_odometry_extracts_pose_and_yaw():
     position, velocity = bm._parse_odometry(message)
     assert position == {"x": 1.25, "y": -0.5, "yaw_deg": pytest.approx(90.0)}
     assert velocity == {"vx": 0.1, "vy": 0.0, "wz": -0.2}
-
-
-# --- rosbridge topic I/O ----------------------------------------------------------
-
-def test_bridge_publish_requires_topic_and_valid_json(monkeypatch):
-    monkeypatch.setattr(rb, "get_connection", lambda *a, **k: pytest.fail("must not connect"))
-    assert "set topic" in _NODE_REGISTRY["ROS2BridgePublish"]({})["report"]
-    result = _NODE_REGISTRY["ROS2BridgePublish"]({"topic": "/x", "payload": "not json"})
-    assert result["published"] is False
-    assert "not valid JSON" in result["report"]
-    result = _NODE_REGISTRY["ROS2BridgePublish"]({"topic": "/x", "payload": "[1, 2]"})
-    assert result["published"] is False
-    assert "JSON object" in result["report"]
-
-
-def test_bridge_publish_reports_connection_error(monkeypatch):
-    monkeypatch.setattr(rb, "available", lambda: (True, ""))
-    def boom(*a, **k):
-        raise RuntimeError("could not connect to rosbridge at ws://robot:9090")
-    monkeypatch.setattr(rb, "get_connection", boom)
-    result = _NODE_REGISTRY["ROS2BridgePublish"]({"topic": "/x", "payload": "{}"})
-    assert result["published"] is False
-    assert "could not connect" in result["report"]
-
-
-def test_bridge_echo_requires_topic_and_reports_silence(monkeypatch):
-    assert "set topic" in _NODE_REGISTRY["ROS2BridgeEcho"]({})["report"]
-    monkeypatch.setattr(rb, "available", lambda: (True, ""))
-    monkeypatch.setattr(rb, "get_connection", lambda *a, **k: object())
-    monkeypatch.setattr(rb, "_read_once", lambda *a, **k: None)
-    result = _NODE_REGISTRY["ROS2BridgeEcho"]({"topic": "/battery_state"})
-    assert result["message"] == {}
-    assert "no message" in result["report"]
-
-
-def test_bridge_echo_returns_message(monkeypatch):
-    monkeypatch.setattr(rb, "available", lambda: (True, ""))
-    monkeypatch.setattr(rb, "get_connection", lambda *a, **k: object())
-    monkeypatch.setattr(rb, "_read_once", lambda *a, **k: {"voltage": 8.2})
-    result = _NODE_REGISTRY["ROS2BridgeEcho"](
-        {"topic": "/battery_state", "msg_type": "sensor_msgs/msg/BatteryState"}
-    )
-    assert result["message"] == {"voltage": 8.2}
-    assert "received" in result["report"]

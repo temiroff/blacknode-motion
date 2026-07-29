@@ -1,0 +1,776 @@
+{
+  "kind": "blacknode.workflow",
+  "schema_version": 1,
+  "name": "Move a Robot Joint",
+  "saved_at": "2026-07-21T00:00:00",
+  "entrypoint": {
+    "node_id": "dashboard",
+    "port": "dashboard"
+  },
+  "metadata": {
+    "template": true,
+    "description": "Starts the selected robot driver, reads live joint positions, previews a selectable point-to-point profile, and moves one named joint with a before/after dashboard. The visible Joint name Text node defaults to shoulder_pan. Motion stays disarmed until the Arm motion Bool node is explicitly enabled.",
+    "color": "#2e9fe6",
+    "required_packages": [
+      "blacknode-motion",
+      "blacknode-ros2",
+      "blacknode-robot"
+    ],
+    "required_components": [
+      "blacknode-motion/arm",
+      "blacknode-ros2/core",
+      "blacknode-ros2/diagnostics",
+      "blacknode-robot/core",
+      "blacknode-robot/models"
+    ],
+    "required_adapters": [
+      "blacknode-motion/arm@ros2"
+    ]
+  },
+  "node_meta": {
+    "status": {
+      "id": "status",
+      "type": "ROS2Status",
+      "params": {
+        "transport": "auto",
+        "ensure_rosbridge": true,
+        "host": "127.0.0.1",
+        "port": 9090,
+        "state_topic": "/joint_states",
+        "command_topic": "/joint_commands",
+        "config_topic": "/joint_config",
+        "timeout": 10.0
+      },
+      "pos": [
+        40,
+        240
+      ],
+      "inputs": [
+        "trigger",
+        "transport",
+        "ensure_rosbridge",
+        "host",
+        "port",
+        "state_topic",
+        "command_topic",
+        "config_topic",
+        "timeout"
+      ],
+      "outputs": [
+        "connected",
+        "ready",
+        "transport",
+        "topics",
+        "config",
+        "report"
+      ],
+      "input_types": {
+        "trigger": "Any",
+        "transport": "Text",
+        "ensure_rosbridge": "Bool",
+        "host": "Text",
+        "port": "Int",
+        "state_topic": "Text",
+        "command_topic": "Text",
+        "config_topic": "Text",
+        "timeout": "Float"
+      },
+      "output_types": {
+        "connected": "Bool",
+        "ready": "Bool",
+        "transport": "Text",
+        "topics": "List",
+        "config": "Dict",
+        "report": "Text"
+      },
+      "input_defaults": {
+        "transport": "auto",
+        "ensure_rosbridge": true,
+        "host": "127.0.0.1",
+        "port": 9090,
+        "state_topic": "/joint_states",
+        "command_topic": "/joint_commands",
+        "config_topic": "/joint_config",
+        "timeout": 10.0
+      },
+      "input_choices": {
+        "transport": [
+          "auto",
+          "native",
+          "rosbridge"
+        ]
+      }
+    },
+    "pose": {
+      "id": "pose",
+      "type": "ROS2JointState",
+      "params": {
+        "transport": "auto",
+        "host": "127.0.0.1",
+        "port": 9090,
+        "topic": "/joint_states",
+        "units": "degrees",
+        "timeout": 10.0
+      },
+      "pos": [
+        440,
+        240
+      ],
+      "inputs": [
+        "trigger",
+        "robot",
+        "transport",
+        "host",
+        "port",
+        "topic",
+        "units",
+        "timeout"
+      ],
+      "outputs": [
+        "pose",
+        "names",
+        "report"
+      ],
+      "input_types": {
+        "trigger": "Any",
+        "robot": "Dict",
+        "transport": "Text",
+        "host": "Text",
+        "port": "Int",
+        "topic": "Text",
+        "units": "Text",
+        "timeout": "Float"
+      },
+      "output_types": {
+        "pose": "Dict",
+        "names": "List",
+        "report": "Text"
+      },
+      "input_defaults": {
+        "robot": {},
+        "transport": "auto",
+        "host": "127.0.0.1",
+        "port": 9090,
+        "topic": "/joint_states",
+        "units": "degrees",
+        "timeout": 10.0
+      },
+      "input_choices": {
+        "transport": [
+          "auto",
+          "native",
+          "rosbridge"
+        ],
+        "units": [
+          "radians",
+          "degrees"
+        ]
+      }
+    },
+    "move": {
+      "id": "move",
+      "type": "ROS2SetJoint",
+      "params": {
+        "transport": "auto",
+        "host": "127.0.0.1",
+        "port": 9090,
+        "state_topic": "/joint_states",
+        "command_topic": "/joint_commands",
+        "config_topic": "/joint_config",
+        "joint": "shoulder_pan",
+        "position": 35.0,
+        "units": "degrees",
+        "motion_profile": {},
+        "profile_mode": "linear",
+        "ramp_seconds": 0.8,
+        "max_velocity": 90.0,
+        "max_acceleration": 180.0,
+        "hold_seconds": 0.2,
+        "rate_hz": 30.0,
+        "armed": false,
+        "timeout": 10.0,
+        "robot": {}
+      },
+      "pos": [
+        840,
+        240
+      ],
+      "inputs": [
+        "trigger",
+        "transport",
+        "robot",
+        "host",
+        "port",
+        "state_topic",
+        "command_topic",
+        "config_topic",
+        "joint",
+        "position",
+        "units",
+        "motion_profile",
+        "profile_mode",
+        "ramp_seconds",
+        "max_velocity",
+        "max_acceleration",
+        "hold_seconds",
+        "rate_hz",
+        "armed",
+        "timeout"
+      ],
+      "outputs": [
+        "moved",
+        "joint",
+        "before",
+        "after",
+        "target",
+        "report"
+      ],
+      "input_types": {
+        "trigger": "Any",
+        "transport": "Text",
+        "robot": "Dict",
+        "host": "Text",
+        "port": "Int",
+        "state_topic": "Text",
+        "command_topic": "Text",
+        "config_topic": "Text",
+        "joint": "Text",
+        "position": "Float",
+        "units": "Text",
+        "motion_profile": "Dict",
+        "profile_mode": "Text",
+        "ramp_seconds": "Float",
+        "max_velocity": "Float",
+        "max_acceleration": "Float",
+        "hold_seconds": "Float",
+        "rate_hz": "Float",
+        "armed": "Bool",
+        "timeout": "Float"
+      },
+      "output_types": {
+        "moved": "Bool",
+        "joint": "Text",
+        "before": "Dict",
+        "after": "Dict",
+        "target": "Dict",
+        "report": "Text"
+      },
+      "input_defaults": {
+        "transport": "auto",
+        "host": "127.0.0.1",
+        "port": 9090,
+        "state_topic": "/joint_states",
+        "command_topic": "/joint_commands",
+        "config_topic": "/joint_config",
+        "joint": "",
+        "position": 35.0,
+        "units": "degrees",
+        "motion_profile": {},
+        "profile_mode": "linear",
+        "ramp_seconds": 0.8,
+        "max_velocity": 90.0,
+        "max_acceleration": 180.0,
+        "hold_seconds": 0.2,
+        "rate_hz": 30.0,
+        "armed": false,
+        "timeout": 10.0,
+        "robot": {}
+      },
+      "input_choices": {
+        "transport": [
+          "auto",
+          "native",
+          "rosbridge"
+        ],
+        "units": [
+          "radians",
+          "degrees"
+        ]
+      }
+    },
+    "dashboard": {
+      "id": "dashboard",
+      "type": "ROS2MotionDashboard",
+      "params": {
+        "joint": "",
+        "moved": false,
+        "units": "degrees"
+      },
+      "pos": [
+        1280,
+        240
+      ],
+      "inputs": [
+        "joint",
+        "pose",
+        "before",
+        "after",
+        "target",
+        "moved",
+        "units"
+      ],
+      "outputs": [
+        "dashboard",
+        "live",
+        "summary"
+      ],
+      "input_types": {
+        "joint": "Text",
+        "pose": "Dict",
+        "before": "Dict",
+        "after": "Dict",
+        "target": "Dict",
+        "moved": "Bool",
+        "units": "Text"
+      },
+      "output_types": {
+        "dashboard": "Image",
+        "live": "Bool",
+        "summary": "Dict"
+      },
+      "input_defaults": {
+        "joint": "",
+        "moved": false,
+        "units": "degrees"
+      }
+    },
+    "joints_out": {
+      "id": "joints_out",
+      "type": "Output",
+      "params": {
+        "label": "live joint names"
+      },
+      "pos": [
+        840,
+        520
+      ],
+      "inputs": [
+        "value"
+      ],
+      "outputs": [],
+      "input_types": {
+        "value": "Any"
+      },
+      "output_types": {},
+      "input_defaults": {}
+    },
+    "move_out": {
+      "id": "move_out",
+      "type": "Output",
+      "params": {
+        "label": "move result"
+      },
+      "pos": [
+        1280,
+        520
+      ],
+      "inputs": [
+        "value"
+      ],
+      "outputs": [],
+      "input_types": {
+        "value": "Any"
+      },
+      "output_types": {},
+      "input_defaults": {}
+    },
+    "robot": {
+      "id": "robot",
+      "type": "Robot",
+      "params": {
+        "profile_id": "so_arm101",
+        "selection": 0,
+        "action": "start",
+        "run_id": "robot_driver",
+        "host": "127.0.0.1",
+        "port": 9090,
+        "state_topic": "/joint_states",
+        "command_topic": "/joint_commands",
+        "config_topic": "/joint_config",
+        "control_topic": "/robot_control",
+        "units": "degrees"
+      },
+      "pos": [
+        400,
+        480
+      ],
+      "inputs": [
+        "trigger",
+        "profile_id",
+        "selection",
+        "hardware",
+        "usb",
+        "driver",
+        "hardware_selection",
+        "hardware_filter",
+        "port_filter",
+        "match_vendor_id",
+        "match_product_id",
+        "probe_open",
+        "auto_discover",
+        "action",
+        "run_id",
+        "require_hardware",
+        "require_usb",
+        "serial_port",
+        "host",
+        "port",
+        "state_topic",
+        "command_topic",
+        "config_topic",
+        "control_topic",
+        "units",
+        "topic_prefix",
+        "rate_hz"
+      ],
+      "outputs": [
+        "found",
+        "ready",
+        "usb_ready",
+        "driver_running",
+        "port",
+        "serial",
+        "profile",
+        "driver",
+        "robot",
+        "hardware",
+        "usb",
+        "devices",
+        "recommended",
+        "permissions",
+        "calibration",
+        "path",
+        "report"
+      ],
+      "input_types": {
+        "trigger": "Any",
+        "profile_id": "Text",
+        "selection": "Int",
+        "hardware": "Dict",
+        "usb": "Dict",
+        "driver": "Dict",
+        "hardware_selection": "Int",
+        "hardware_filter": "Text",
+        "port_filter": "Text",
+        "match_vendor_id": "Text",
+        "match_product_id": "Text",
+        "probe_open": "Bool",
+        "auto_discover": "Bool",
+        "action": "Text",
+        "run_id": "Text",
+        "require_hardware": "Bool",
+        "require_usb": "Bool",
+        "serial_port": "Text",
+        "host": "Text",
+        "port": "Int",
+        "state_topic": "Text",
+        "command_topic": "Text",
+        "config_topic": "Text",
+        "control_topic": "Text",
+        "units": "Text",
+        "topic_prefix": "Text",
+        "rate_hz": "Float"
+      },
+      "output_types": {
+        "found": "Bool",
+        "ready": "Bool",
+        "usb_ready": "Bool",
+        "driver_running": "Bool",
+        "port": "Text",
+        "serial": "Text",
+        "profile": "Dict",
+        "driver": "Dict",
+        "robot": "Dict",
+        "hardware": "Dict",
+        "usb": "Dict",
+        "devices": "List",
+        "recommended": "Dict",
+        "permissions": "Dict",
+        "calibration": "Dict",
+        "path": "Text",
+        "report": "Text"
+      },
+      "input_defaults": {
+        "profile_id": "so_arm101",
+        "selection": 0,
+        "hardware_selection": 0,
+        "hardware_filter": "",
+        "port_filter": "",
+        "match_vendor_id": "",
+        "match_product_id": "",
+        "probe_open": false,
+        "auto_discover": true,
+        "action": "check",
+        "run_id": "robot_driver",
+        "require_hardware": true,
+        "require_usb": true,
+        "serial_port": "",
+        "host": "127.0.0.1",
+        "port": 9090,
+        "state_topic": "/joint_states",
+        "command_topic": "/joint_commands",
+        "config_topic": "/joint_config",
+        "control_topic": "/robot_control",
+        "units": "degrees",
+        "topic_prefix": "",
+        "rate_hz": 0.0
+      },
+      "input_choices": {
+        "profile_id": [
+          "so_arm101"
+        ],
+        "action": [
+          "check",
+          "start",
+          "stop"
+        ],
+        "units": [
+          "radians",
+          "degrees"
+        ],
+        "profile_mode": [
+          "direct",
+          "linear",
+          "trapezoidal",
+          "minimum_jerk"
+        ]
+      }
+    },
+    "joint_name": {
+      "id": "joint_name",
+      "type": "Text",
+      "params": {
+        "value": "shoulder_pan"
+      },
+      "pos": [
+        840,
+        80
+      ],
+      "inputs": [],
+      "outputs": [
+        "value"
+      ],
+      "input_types": {},
+      "output_types": {
+        "value": "Text"
+      },
+      "input_defaults": {}
+    },
+    "arm_motion": {
+      "id": "arm_motion",
+      "type": "Bool",
+      "params": {
+        "value": false,
+        "label": "Armed"
+      },
+      "pos": [
+        1040,
+        80
+      ],
+      "inputs": [],
+      "outputs": [
+        "value"
+      ],
+      "input_types": {},
+      "output_types": {
+        "value": "Bool"
+      },
+      "input_defaults": {}
+    },
+    "position_angle": {
+      "id": "position_angle",
+      "type": "Float",
+      "params": {
+        "value": 35.0,
+        "label": "Position angle"
+      },
+      "pos": [
+        1240,
+        80
+      ],
+      "inputs": [],
+      "outputs": [
+        "value"
+      ],
+      "input_types": {},
+      "output_types": {
+        "value": "Float"
+      },
+      "input_defaults": {}
+    },
+    "motion_profile": {
+      "id": "motion_profile",
+      "type": "JointMotionProfile",
+      "params": {
+        "mode": "trapezoidal",
+        "distance": 35.0,
+        "units": "degrees",
+        "min_duration": 0.8,
+        "max_velocity": 90.0,
+        "max_acceleration": 180.0,
+        "rate_hz": 50.0
+      },
+      "pos": [
+        840,
+        680
+      ],
+      "inputs": [
+        "mode",
+        "distance",
+        "units",
+        "min_duration",
+        "max_velocity",
+        "max_acceleration",
+        "rate_hz"
+      ],
+      "outputs": [
+        "profile",
+        "samples",
+        "duration",
+        "preview",
+        "report"
+      ],
+      "input_types": {
+        "mode": "Text",
+        "distance": "Float",
+        "units": "Text",
+        "min_duration": "Float",
+        "max_velocity": "Float",
+        "max_acceleration": "Float",
+        "rate_hz": "Float"
+      },
+      "output_types": {
+        "profile": "Dict",
+        "samples": "List",
+        "duration": "Float",
+        "preview": "Image",
+        "report": "Text"
+      },
+      "input_defaults": {
+        "mode": "trapezoidal",
+        "distance": 30.0,
+        "units": "degrees",
+        "min_duration": 0.8,
+        "max_velocity": 90.0,
+        "max_acceleration": 180.0,
+        "rate_hz": 50.0
+      },
+      "input_choices": {
+        "mode": [
+          "direct",
+          "linear",
+          "trapezoidal",
+          "minimum_jerk"
+        ],
+        "units": [
+          "degrees",
+          "radians"
+        ]
+      }
+    }
+  },
+  "edges": [
+    {
+      "from": "status",
+      "from_port": "report",
+      "to": "robot",
+      "to_port": "trigger"
+    },
+    {
+      "from": "robot",
+      "from_port": "report",
+      "to": "pose",
+      "to_port": "trigger"
+    },
+    {
+      "from": "robot",
+      "from_port": "robot",
+      "to": "pose",
+      "to_port": "robot"
+    },
+    {
+      "from": "robot",
+      "from_port": "robot",
+      "to": "move",
+      "to_port": "robot"
+    },
+    {
+      "from": "joint_name",
+      "from_port": "value",
+      "to": "move",
+      "to_port": "joint"
+    },
+    {
+      "from": "arm_motion",
+      "from_port": "value",
+      "to": "move",
+      "to_port": "armed"
+    },
+    {
+      "from": "position_angle",
+      "from_port": "value",
+      "to": "move",
+      "to_port": "position"
+    },
+    {
+      "from": "motion_profile",
+      "from_port": "profile",
+      "to": "move",
+      "to_port": "motion_profile"
+    },
+    {
+      "from": "pose",
+      "from_port": "report",
+      "to": "move",
+      "to_port": "trigger"
+    },
+    {
+      "from": "pose",
+      "from_port": "names",
+      "to": "joints_out",
+      "to_port": "value"
+    },
+    {
+      "from": "pose",
+      "from_port": "pose",
+      "to": "dashboard",
+      "to_port": "pose"
+    },
+    {
+      "from": "move",
+      "from_port": "joint",
+      "to": "dashboard",
+      "to_port": "joint"
+    },
+    {
+      "from": "move",
+      "from_port": "before",
+      "to": "dashboard",
+      "to_port": "before"
+    },
+    {
+      "from": "move",
+      "from_port": "after",
+      "to": "dashboard",
+      "to_port": "after"
+    },
+    {
+      "from": "move",
+      "from_port": "target",
+      "to": "dashboard",
+      "to_port": "target"
+    },
+    {
+      "from": "move",
+      "from_port": "moved",
+      "to": "dashboard",
+      "to_port": "moved"
+    },
+    {
+      "from": "move",
+      "from_port": "report",
+      "to": "move_out",
+      "to_port": "value"
+    }
+  ]
+}

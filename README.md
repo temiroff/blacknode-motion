@@ -1,50 +1,80 @@
-# blacknode-controllers
+# blacknode-motion
 
-This repository is the controller layer. Components operate on stable robot
-and perception capabilities and remain independent of vendor drivers. Motion
-components begin disabled until their contracts, mock providers, and safety
-tests are implemented.
+This package owns robot motion planning, trajectory generation, execution,
+learned motion policies, arbitration, and motion safety over stable capability
+contracts. Vendor SDKs and physical transports remain in `blacknode-drivers`.
 
-Each component keeps its transport-neutral contract separate from the
-adapters that put it on a wire. A ROS 2 adapter declares a versioned
-dependency on `blacknode-ros2/core` and never the other way round, so a
-second transport can be added later as a sibling adapter.
+```text
+blacknode-motion
+├── core
+├── arm
+│   ├── planning
+│   │   └── providers
+│   │       ├── moveit
+│   │       └── cumotion
+│   ├── trajectory
+│   └── execution
+├── base
+│   ├── planning
+│   │   └── providers
+│   │       └── nav2
+│   └── execution
+├── policy
+└── safety
+```
 
-## Components
+## Public components
 
-| Component | Default | ROS 2 adapter nodes |
-|---|---|---|
-| `joint-control` | on | `JointMotionProfile`, `ROS2JointState`, `ROS2SetJoint`, `ROS2ManualMove`, `ROS2MotionDashboard` |
-| `mobile-base` | off | `BaseSafetyGate`, `ROS2BaseMove`, `ROS2BaseStop`, `ROS2LaserScanCheck`, `ROS2OdomState` |
-| `policy` | on | `PolicyRuntime`, `PolicySafetyGate` |
-| `nav2`, `manipulation`, `command-arbitration`, `safety-supervisors` | off | contracts only, not yet implemented |
+| Component | Purpose |
+|---|---|
+| `core` | Motion ownership, priority, and arbitration contracts |
+| `arm` | Arm planning, trajectories, execution, and ROS 2 control surfaces |
+| `base` | Base planning, navigation providers, execution, and ROS 2 control |
+| `policy` | Learned-motion policy execution and lifecycle |
+| `safety` | Motion freshness, limits, stop, and shutdown supervision |
 
-### joint-control
+## Arm control
 
-Drives **any** robot exposing `sensor_msgs/msg/JointState`: topics, joint
-name, and units are all inputs, so robot specifics live in templates rather
-than in the nodes. `transport=auto` prefers native `rclpy` and falls back to
-rosbridge.
+`JointMotionProfile` is transport-neutral and belongs to `arm/trajectory`. It
+generates canonical direct, linear, trapezoidal, or minimum-jerk joint
+trajectories.
 
-Motion is gated. `ROS2SetJoint` does nothing until `armed=true`; while
-disarmed it still reads live pose, so the preview shows real numbers and the
-exact target it *would* command. Armed moves sync to the current pose first,
-clamp to any limits published on the config topic, and stream a heartbeat so
-the robot driver's own timeout still applies.
+The nested `arm/ros2` adapter provides `ROS2JointSliders`,
+`ROS2MotionDashboard`, `ROS2SetJoint`, `ROS2JointState`, and
+`ROS2ManualMove`. These nodes are control surfaces: they submit bounded,
+explicitly armed commands through the arm-controller path. They do not own a
+physical servo bus.
 
-`JointMotionProfile` selects and previews `direct`, `linear`, `trapezoidal`,
-or `minimum_jerk` point-to-point motion. It reports the calculated duration,
-sample count, peak velocity, and peak acceleration and outputs a canonical
-profile contract for `ROS2SetJoint`. The motion node remains the only component
-that can publish, so profiling does not bypass its disarmed gate or limits.
-`linear` remains the default on saved and unwired `ROS2SetJoint` nodes.
+Motion remains disarmed by default. Armed moves synchronize to current pose,
+apply calibrated limits, and preserve driver heartbeat safeguards.
 
-`ROS2ManualMove` releases or holds torque for hand positioning and owns the
-live joint monitor; `ROS2MotionDashboard` renders either its live pose or a
-one-time before/after motion result. Both are managed live services: inspect
-them with `get_editor_runtime_status` and stop them with
-`stop_editor_runtime_services`. Releasing torque disables actuator holding
-power, so support the arm before doing it.
+## Base and policy control
 
-Template: **Move a Robot Joint**
-(`components/joint-control/adapters/ros2/templates/`).
+The `base/ros2` adapter owns bounded base commands, stop, odometry, and scan
+checks. Navigation implementations such as Nav2 belong under
+`base/planning/providers/`.
+
+The `policy` component owns learned-policy lifecycle and safety-gated
+execution. Model architecture and training remain in `blacknode-training`.
+
+## Provider placement
+
+MoveIt and cuMotion integrations belong under `arm/planning/providers/`. A provider is
+added to the manifest when its usable implementation, dependencies, lifecycle,
+unavailable-state reporting, and tests exist.
+
+ROS integration stays nested under the domain that owns it:
+
+```text
+blacknode-motion/arm/adapters/ros2
+blacknode-motion/base/adapters/ros2
+blacknode-motion/policy/adapters/ros2
+```
+
+## Verification
+
+From the Blacknode repository root:
+
+```powershell
+python -m pytest packages/blacknode-motion/tests
+```
