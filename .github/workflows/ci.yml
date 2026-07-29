@@ -70,8 +70,8 @@ jobs:
           PYTHONPATH: python
         shell: bash
         run: |
-          python -m blacknode.cli packages enable blacknode-controllers mobile-base --adapter ros2
-          python -m blacknode.cli packages enable blacknode-controllers policy --adapter ros2
+          python -m blacknode.cli packages enable blacknode-motion base --adapter ros2
+          python -m blacknode.cli packages enable blacknode-motion policy --adapter ros2
           find ../package -path '*/templates/*.json' -print0 | while IFS= read -r -d '' template; do
             python -m blacknode.cli validate "$template"
           done
