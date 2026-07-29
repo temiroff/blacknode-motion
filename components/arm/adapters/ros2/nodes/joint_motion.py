@@ -29,6 +29,7 @@ from blacknode.pkg.blacknode_motion.arm.motion_profiles import (
     canonical_profile,
     plan_profile,
 )
+from blacknode.pkg.blacknode_motion.arm import arm_controller
 
 
 class _LazyNativeRuntime:
@@ -296,10 +297,30 @@ def ros2_native_set_joint(ctx: dict) -> dict:
             "report": "BLOCKED: the robot driver reports it is read-only (commands_allowed=false).",
         }
 
-    result = nr.stream_motion(
-        command_topic, names, start_rad, target_rad,
-        ramp_seconds=motion_plan["duration"], hold_seconds=hold_seconds,
-        rate_hz=motion_plan["rate_hz"], timeout=timeout, alphas=motion_plan["alphas"],
+    resource = str(
+        (robot.get("driver") or {}).get("hardware_id")
+        or robot.get("device_id")
+        or command_topic
+    )
+    result = arm_controller.execute_joint_target(
+        lambda safe_target: nr.stream_motion(
+            command_topic,
+            names,
+            start_rad,
+            safe_target,
+            ramp_seconds=motion_plan["duration"],
+            hold_seconds=hold_seconds,
+            rate_hz=motion_plan["rate_hz"],
+            timeout=timeout,
+            alphas=motion_plan["alphas"],
+        ),
+        resource=resource,
+        owner=f"ui:set-joint:{joint}",
+        current=start_rad,
+        target=target_rad,
+        limits=limits,
+        armed=True,
+        interval=max(0.001, motion_plan["duration"]),
     )
     if not result.get("ok"):
         return {
@@ -455,18 +476,32 @@ def ros2_set_joint(ctx: dict) -> dict:
     if config and config.get("commands_allowed") is False:
         return {**blocked, "before": before, "after": before, "target": target, "report": "BLOCKED: robot reports commands_allowed=false."}
 
-    result = rb.stream_motion(
-        host,
-        port,
-        command_topic,
-        list(start_rad),
-        start_rad,
-        target_rad,
-        ramp_seconds=motion_plan["duration"],
-        hold_seconds=hold_seconds,
-        rate_hz=motion_plan["rate_hz"],
-        timeout=timeout,
-        alphas=motion_plan["alphas"],
+    resource = str(
+        (robot.get("driver") or {}).get("hardware_id")
+        or robot.get("device_id")
+        or f"{host}:{port}{command_topic}"
+    )
+    result = arm_controller.execute_joint_target(
+        lambda safe_target: rb.stream_motion(
+            host,
+            port,
+            command_topic,
+            list(start_rad),
+            start_rad,
+            safe_target,
+            ramp_seconds=motion_plan["duration"],
+            hold_seconds=hold_seconds,
+            rate_hz=motion_plan["rate_hz"],
+            timeout=timeout,
+            alphas=motion_plan["alphas"],
+        ),
+        resource=resource,
+        owner=f"ui:set-joint:{joint}",
+        current=start_rad,
+        target=target_rad,
+        limits=limits,
+        armed=True,
+        interval=max(0.001, motion_plan["duration"]),
     )
     if not result.get("ok"):
         return {
@@ -1278,15 +1313,27 @@ def set_joint_slider_targets(run_id: str, targets: dict[str, Any]) -> dict[str, 
         return {"ok": True, "report": "no in-range joint change"}
 
     if state["transport"] == "native":
-        result = nr.stream_motion(
-            state["command_topic"], names, held, target,
+        publish = lambda safe_target: nr.stream_motion(
+            state["command_topic"], names, held, safe_target,
             ramp_seconds=state["ramp_seconds"], hold_seconds=0.05, rate_hz=30.0,
             timeout=state["timeout"])
+        resource = state["command_topic"]
     else:
-        result = rb.stream_motion(
-            state["host"], state["port"], state["command_topic"], names, held, target,
-            ramp_seconds=state["ramp_seconds"], hold_seconds=0.05, rate_hz=30.0,
-            timeout=state["timeout"])
+        publish = lambda safe_target: rb.stream_motion(
+            state["host"], state["port"], state["command_topic"], names, held,
+            safe_target, ramp_seconds=state["ramp_seconds"], hold_seconds=0.05,
+            rate_hz=30.0, timeout=state["timeout"])
+        resource = f"{state['host']}:{state['port']}{state['command_topic']}"
+    result = arm_controller.execute_joint_target(
+        publish,
+        resource=resource,
+        owner=f"ui:joint-sliders:{run_id}",
+        current=held,
+        target=target,
+        limits=limits,
+        armed=True,
+        interval=max(0.001, state["ramp_seconds"]),
+    )
     if not result.get("ok", True):
         return {"ok": False, "report": f"joint move FAILED: {result.get('error', 'unknown')}"}
     with _JOINT_SLIDER_LOCK:

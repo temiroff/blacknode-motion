@@ -1,6 +1,6 @@
 [package]
 name = "blacknode-motion"
-version = "0.5.0"
+version = "0.6.0"
 description = "Arm and base planning, trajectory generation, execution, policy, arbitration, and motion safety for Blacknode."
 requires-blacknode = ">=0.3.0"
 layer = "motion"
@@ -11,15 +11,25 @@ component-mode = true
 
 [components.core]
 description = "Motion ownership, priority, and command-arbitration contracts."
-default = false
+default = true
+internal = true
 capabilities = ["motion.core", "motion.arbitration"]
+nodes = ["components/core/runtime"]
 
 [components.arm]
 description = "Arm planning, trajectory generation, execution, and manipulation."
 default = true
+aliases = ["joint-control"]
+deprecated-aliases = { joint-control = { replacement = "arm", removal-version = "1.0.0" } }
 capabilities = ["motion.arm", "motion.arm.planning", "motion.arm.trajectory", "motion.arm.execution"]
 nodes = ["components/arm/trajectory/nodes"]
 node-types = ["JointMotionProfile"]
+
+[components.arm.dependencies]
+requires = [
+  { component = "core", version = ">=0.6.0,<1.0.0" },
+  { component = "safety", version = ">=0.6.0,<1.0.0" },
+]
 
 [components.arm.adapters.ros2]
 description = "Arm state and command control surfaces over ROS 2 transports."
@@ -38,7 +48,15 @@ requires = [{ package = "blacknode-ros2", component = "core", version = ">=0.5.6
 [components.base]
 description = "Mobile-base planning, navigation-provider integration, and execution."
 default = false
+aliases = ["mobile-base"]
+deprecated-aliases = { mobile-base = { replacement = "base", removal-version = "1.0.0" } }
 capabilities = ["motion.base", "motion.base.planning", "motion.base.execution"]
+
+[components.base.dependencies]
+requires = [
+  { component = "core", version = ">=0.6.0,<1.0.0" },
+  { component = "safety", version = ">=0.6.0,<1.0.0" },
+]
 
 [components.base.adapters.ros2]
 description = "Safety-gated mobile-base commands, scan checks, odometry, and stop over ROS 2 transports."
@@ -60,6 +78,10 @@ nodes = ["components/policy/nodes"]
 [components.policy.dependencies]
 pip = ["numpy>=1.24", "pillow>=10"]
 imports = ["numpy", "PIL"]
+requires = [
+  { component = "core", version = ">=0.6.0,<1.0.0" },
+  { component = "safety", version = ">=0.6.0,<1.0.0" },
+]
 
 [components.policy.adapters.ros2]
 description = "Safety-gated learned-policy lifecycle and ROS 2 execution."
@@ -74,5 +96,8 @@ requires = [{ package = "blacknode-ros2", component = "rosbridge", version = ">=
 
 [components.safety]
 description = "Motion freshness, limits, stop, and shutdown supervision."
-default = false
+default = true
 capabilities = ["motion.safety", "motion.safety-supervision"]
+
+[components.safety.dependencies]
+requires = [{ component = "core", version = ">=0.6.0,<1.0.0" }]
