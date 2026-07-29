@@ -176,7 +176,15 @@ def test_set_joint_uses_wired_robot_transport_and_topics(monkeypatch):
 
     def fake_read_config(host, port, topic, timeout):
         captured["config"] = (host, port, topic)
-        return {"commands_allowed": True}
+        return {
+            "commands_allowed": True,
+            "joints": {
+                "shoulder_pan": {
+                    "lower": math.radians(-90.0),
+                    "upper": math.radians(90.0),
+                },
+            },
+        }
 
     def fake_read_pose(host, port, topic, timeout):
         captured.setdefault("poses", []).append((host, port, topic))
@@ -224,6 +232,15 @@ def test_set_joint_consumes_wired_trapezoidal_profile(monkeypatch):
     monkeypatch.setattr(rb, "available", lambda: (True, ""))
     poses = iter([{"shoulder_pan": 0.0}, {"shoulder_pan": math.radians(30.0)}])
     monkeypatch.setattr(rb, "read_pose", lambda *args, **kwargs: next(poses))
+    monkeypatch.setattr(rb, "read_config", lambda *args, **kwargs: {
+        "commands_allowed": True,
+        "joints": {
+            "shoulder_pan": {
+                "lower": math.radians(-90.0),
+                "upper": math.radians(90.0),
+            },
+        },
+    })
     captured = {}
 
     def fake_stream(*args, **kwargs):
@@ -244,6 +261,7 @@ def test_set_joint_consumes_wired_trapezoidal_profile(monkeypatch):
         "joint": "shoulder_pan",
         "position": 30.0,
         "units": "degrees",
+        "config_topic": "/joint_config",
         "motion_profile": profile,
         "armed": True,
     })
@@ -317,6 +335,15 @@ def test_native_set_joint_streams_absolute_target(monkeypatch):
 
     monkeypatch.setattr(nr, "available", lambda: (True, ""))
     monkeypatch.setattr(nr, "read_pose", lambda *a, **k: next(poses))
+    monkeypatch.setattr(nr, "read_config", lambda *a, **k: {
+        "commands_allowed": True,
+        "joints": {
+            "gripper": {
+                "lower": math.radians(0.0),
+                "upper": math.radians(90.0),
+            },
+        },
+    })
 
     def fake_stream(command_topic, names, s, t, **kwargs):
         captured["command_topic"] = command_topic
@@ -330,6 +357,7 @@ def test_native_set_joint_streams_absolute_target(monkeypatch):
         "joint": "gripper",
         "position": 60.0,
         "units": "degrees",
+        "config_topic": "/joint_config",
         "armed": True,
     })
 

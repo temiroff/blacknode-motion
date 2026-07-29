@@ -8,10 +8,29 @@ def test_motion_layer_exposes_domain_components():
     assert info.ok
     assert info.layer == "motion"
     assert info.component_mode is True
-    assert info.enabled_components == ["arm", "policy"]
+    assert info.enabled_components == ["core", "arm", "policy", "safety"]
     assert set(info.components) == {"core", "arm", "base", "policy", "safety"}
-    assert info.components["arm"]["aliases"] == []
-    assert info.components["base"]["aliases"] == []
+    assert info.components["core"]["internal"] is True
+    assert info.components["arm"]["aliases"] == ["joint-control"]
+    assert info.components["base"]["aliases"] == ["mobile-base"]
+    for component_name in ("arm", "base", "policy"):
+        assert info.components[component_name]["requirements"] == [
+            {
+                "package": "",
+                "component": "core",
+                "version": ">=0.6.0,<1.0.0",
+            },
+            {
+                "package": "",
+                "component": "safety",
+                "version": ">=0.6.0,<1.0.0",
+            },
+        ]
+    assert info.components["safety"]["requirements"] == [{
+        "package": "",
+        "component": "core",
+        "version": ">=0.6.0,<1.0.0",
+    }]
 
 
 def test_arm_owns_profiles_and_ros2_control_surfaces():

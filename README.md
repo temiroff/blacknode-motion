@@ -27,11 +27,14 @@ blacknode-motion
 
 | Component | Purpose |
 |---|---|
-| `core` | Motion ownership, priority, and arbitration contracts |
 | `arm` | Arm planning, trajectories, execution, and ROS 2 control surfaces |
 | `base` | Base planning, navigation providers, execution, and ROS 2 control |
 | `policy` | Learned-motion policy execution and lifecycle |
 | `safety` | Motion freshness, limits, stop, and shutdown supervision |
+
+`core` is an internal component. `arm`, `base`, `policy`, and `safety`
+activate it automatically; users do not select command arbitration separately.
+Arm, base, and policy also activate `safety`.
 
 ## Arm control
 
@@ -41,12 +44,34 @@ trajectories.
 
 The nested `arm/ros2` adapter provides `ROS2JointSliders`,
 `ROS2MotionDashboard`, `ROS2SetJoint`, `ROS2JointState`, and
-`ROS2ManualMove`. These nodes are control surfaces: they submit bounded,
-explicitly armed commands through the arm-controller path. They do not own a
-physical servo bus.
+`ROS2ManualMove`. These nodes are control surfaces. They submit requests to the
+arm execution gateway, which applies command ownership and motion safety before
+the ROS adapter publishes to a driver-owned endpoint.
 
 Motion remains disarmed by default. Armed moves synchronize to current pose,
 apply calibrated limits, and preserve driver heartbeat safeguards.
+
+```text
+UI or skill
+    -> motion/arm execution gateway
+    -> core ownership arbitration
+    -> motion safety
+    -> Feetech or another concrete driver
+```
+
+UI and skill modules must not call a driver adapter or raw command publisher.
+The execution gateway is the only application-level command writer.
+
+## Layered safety
+
+| Layer | Responsibility |
+|---|---|
+| Driver | Communication timeout, vendor faults, temperature limits, final command clamping, and torque disable |
+| Motion | Joint and velocity limits, collision-provider checks, freshness, command ownership, and authorization |
+| Physical/firmware | Emergency-stop circuit and firmware-level shutdown |
+
+Each layer remains effective when an upstream layer fails. Motion safety does
+not replace driver or physical safeguards.
 
 ## Base and policy control
 
@@ -70,6 +95,16 @@ blacknode-motion/arm/adapters/ros2
 blacknode-motion/base/adapters/ros2
 blacknode-motion/policy/adapters/ros2
 ```
+
+## Deprecated component names
+
+| Deprecated | Replacement | Removal |
+|---|---|---|
+| `joint-control` | `arm` | `1.0.0` |
+| `mobile-base` | `base` | `1.0.0` |
+
+Selecting a deprecated name emits a warning that includes its replacement and
+planned removal version.
 
 ## Verification
 
