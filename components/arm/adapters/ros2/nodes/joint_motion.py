@@ -536,7 +536,7 @@ def ros2_set_joint(ctx: dict) -> dict:
 @node(
     name="ROS2JointState",
     category=_CATEGORY,
-    primary_inputs=["robot"],
+    primary_inputs=["robot", "command"],
     description=(
         "Read joint state using native rclpy when available, otherwise rosbridge. "
         "Wire a Robot node's 'robot' output into 'robot' and it uses that robot's "
@@ -1196,6 +1196,7 @@ def _slider_joint_specs(names, pose, limits, units):
     inputs={
         "trigger": AnyPort,
         "robot": Dict,
+        "command": Dict(default={}),
         "run_id": Text(default="joint_sliders"),
         "targets": Dict(default={}),
         "armed": Bool(default=False),
@@ -1271,9 +1272,12 @@ def ros2_joint_sliders(ctx: dict) -> dict:
     with _JOINT_SLIDER_LOCK:
         _JOINT_SLIDER_STATE[run_id] = {
             "transport": transport, "host": host, "port": port,
-            "command_topic": command_topic, "units": units, "names": names,
+            "state_topic": state_topic, "command_topic": command_topic,
+            "units": units, "names": names,
             "limits": limits, "ramp_seconds": ramp_seconds, "timeout": timeout,
+            "commands_allowed": config.get("commands_allowed", True),
             "armed": armed, "held_rad": dict(pose_rad),
+            "command_lock": threading.Lock(),
         }
     report = (
         f"LIVE joint sliders on {state_topic} ({len(names)} joints). "
@@ -1292,54 +1296,120 @@ def set_joint_slider_targets(run_id: str, targets: dict[str, Any]) -> dict[str, 
         if state is None:
             return {"ok": False, "report": f"joint sliders '{run_id}' is not running"}
         state = dict(state)
-        held = dict(state["held_rad"])
     if not state.get("armed"):
         return {"ok": False, "report": "BLOCKED: arm the sliders before moving"}
-    units = state["units"]
-    limits = state["limits"]
-    names = state["names"]
-    target = dict(held)
-    changed = []
-    for joint, value in (targets or {}).items():
-        if joint not in names or not isinstance(value, (int, float)):
-            continue
-        rad = _to_radians(float(value), units)
-        if joint in limits:
-            lo, hi = limits[joint]
-            rad = max(lo, min(hi, rad))
-        target[joint] = rad
-        changed.append(joint)
-    if not changed:
-        return {"ok": True, "report": "no in-range joint change"}
+    if state.get("commands_allowed") is False:
+        return {"ok": False, "report": "BLOCKED: the robot driver reports commands_allowed=false"}
+    command_lock = state["command_lock"]
+    with command_lock:
+        with _JOINT_SLIDER_LOCK:
+            live_state = _JOINT_SLIDER_STATE.get(run_id)
+            if live_state is None or not live_state.get("armed"):
+                return {"ok": False, "report": "BLOCKED: arm the sliders before moving"}
+            state = dict(live_state)
+        if state["transport"] == "native":
+            try:
+                current = nr.read_pose(
+                    state["state_topic"],
+                    min(state["timeout"], 2.0),
+                ) or {}
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "report": f"joint move FAILED: live feedback unavailable: {exc}"}
+        else:
+            try:
+                current = rb.read_pose(
+                    state["host"],
+                    state["port"],
+                    state["state_topic"],
+                    min(state["timeout"], 2.0),
+                ) or {}
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "report": f"joint move FAILED: live feedback unavailable: {exc}"}
+        names = state["names"]
+        if not current or any(name not in current for name in names):
+            return {"ok": False, "report": "BLOCKED: complete live joint feedback is unavailable"}
+        held = {name: float(current[name]) for name in names}
+        units = state["units"]
+        limits = state["limits"]
+        target = dict(held)
+        changed = []
+        for joint, value in (targets or {}).items():
+            if joint not in names or not isinstance(value, (int, float)):
+                continue
+            rad = _to_radians(float(value), units)
+            if joint in limits:
+                lo, hi = limits[joint]
+                rad = max(lo, min(hi, rad))
+            target[joint] = rad
+            changed.append(joint)
+        if not changed:
+            return {"ok": True, "report": "no in-range joint change"}
 
-    if state["transport"] == "native":
-        publish = lambda safe_target: nr.stream_motion(
-            state["command_topic"], names, held, safe_target,
-            ramp_seconds=state["ramp_seconds"], hold_seconds=0.05, rate_hz=30.0,
-            timeout=state["timeout"])
-        resource = state["command_topic"]
-    else:
-        publish = lambda safe_target: rb.stream_motion(
-            state["host"], state["port"], state["command_topic"], names, held,
-            safe_target, ramp_seconds=state["ramp_seconds"], hold_seconds=0.05,
-            rate_hz=30.0, timeout=state["timeout"])
-        resource = f"{state['host']}:{state['port']}{state['command_topic']}"
-    result = arm_controller.execute_joint_target(
-        publish,
-        resource=resource,
-        owner=f"ui:joint-sliders:{run_id}",
-        current=held,
-        target=target,
-        limits=limits,
-        armed=True,
-        interval=max(0.001, state["ramp_seconds"]),
-    )
-    if not result.get("ok", True):
-        return {"ok": False, "report": f"joint move FAILED: {result.get('error', 'unknown')}"}
+        if state["transport"] == "native":
+            publish = lambda safe_target: nr.stream_motion(
+                state["command_topic"], names, held, safe_target,
+                ramp_seconds=state["ramp_seconds"], hold_seconds=0.05, rate_hz=30.0,
+                timeout=state["timeout"])
+            resource = state["command_topic"]
+        else:
+            publish = lambda safe_target: rb.stream_motion(
+                state["host"], state["port"], state["command_topic"], names, held,
+                safe_target, ramp_seconds=state["ramp_seconds"], hold_seconds=0.05,
+                rate_hz=30.0, timeout=state["timeout"])
+            resource = f"{state['host']}:{state['port']}{state['command_topic']}"
+        result = arm_controller.execute_joint_target(
+            publish,
+            resource=resource,
+            owner=f"ui:joint-sliders:{run_id}",
+            current=held,
+            target=target,
+            limits=limits,
+            armed=True,
+            feedback_age=0.0,
+            interval=max(0.001, state["ramp_seconds"]),
+        )
+        if not result.get("ok", True):
+            return {"ok": False, "report": f"joint move FAILED: {result.get('error', 'unknown')}"}
+        with _JOINT_SLIDER_LOCK:
+            if run_id in _JOINT_SLIDER_STATE:
+                _JOINT_SLIDER_STATE[run_id]["held_rad"] = target
+        return {"ok": True, "report": f"moved {', '.join(changed)}", "commanded": True}
+
+
+def set_joint_slider_command(run_id: str, command: dict[str, Any]) -> dict[str, Any]:
+    """Consume the canonical command request emitted by ``RobotServo``.
+
+    The graph edge expresses operator intent, while this live motion node still
+    owns authorization, current-pose synchronization, calibrated limits, and
+    transport publication.
+    """
+    request = dict(command or {})
+    if request.get("kind") != "blacknode.joint-command-request":
+        return {"ok": False, "report": "BLOCKED: unsupported joint command"}
+    if int(request.get("schema_version") or 0) != 1:
+        return {"ok": False, "report": "BLOCKED: unsupported joint command schema"}
+    if request.get("requires_motion_authorization") is not True:
+        return {"ok": False, "report": "BLOCKED: joint command did not request motion authorization"}
+    joint = str(request.get("joint_name") or "").strip()
+    if not joint:
+        return {"ok": False, "report": "BLOCKED: joint command has no joint name"}
+    try:
+        position_rad = float(request["position_rad"])
+        issued_at = float(request["issued_at"])
+    except (KeyError, TypeError, ValueError):
+        return {"ok": False, "report": "BLOCKED: joint command position or timestamp is invalid"}
+    if not math.isfinite(position_rad):
+        return {"ok": False, "report": "BLOCKED: joint command position is not finite"}
+    age = time.time() - issued_at
+    if age < -1.0 or age > 0.75:
+        return {"ok": False, "report": "BLOCKED: joint command is stale"}
     with _JOINT_SLIDER_LOCK:
-        if run_id in _JOINT_SLIDER_STATE:
-            _JOINT_SLIDER_STATE[run_id]["held_rad"] = target
-    return {"ok": True, "report": f"moved {', '.join(changed)}", "commanded": True}
+        state = _JOINT_SLIDER_STATE.get(run_id)
+        units = str(state.get("units") or "degrees") if state else "degrees"
+    return set_joint_slider_targets(
+        run_id,
+        {joint: _from_radians(position_rad, units)},
+    )
 
 
 def set_joint_slider_armed(run_id: str, armed: bool) -> dict[str, Any]:

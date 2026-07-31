@@ -6,6 +6,7 @@ are monkeypatched, and the arming/clamping/dashboard logic is exercised pure.
 import base64
 import json
 import math
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -131,11 +132,61 @@ def test_joint_sliders_read_joints_and_move_only_when_armed(monkeypatch):
     assert moves[0]["shoulder_pan"] == pytest.approx(math.radians(90.0))  # clamped to upper limit
 
 
+def test_joint_sliders_accept_fresh_canonical_servo_command_only_when_armed(monkeypatch):
+    monkeypatch.setattr(nr, "available", lambda: (False, "no rclpy"))
+    monkeypatch.setattr(rb, "available", lambda: (True, ""))
+    monkeypatch.setattr(rb, "read_pose", lambda *a, **k: {"shoulder_pan": 0.0})
+    monkeypatch.setattr(rb, "read_config", lambda *a, **k: {"joints": {
+        "shoulder_pan": {"lower": -1.0, "upper": 1.0},
+    }})
+    moves = []
+    monkeypatch.setattr(
+        rb,
+        "stream_motion",
+        lambda host, port, cmd, names, start, target, **kwargs:
+            moves.append(dict(target)) or {"ok": True},
+    )
+    _NODE_REGISTRY["ROS2JointSliders"]({
+        "run_id": "servo_link",
+        "host": "h",
+        "command_topic": "/servo_link_commands",
+        "units": "degrees",
+        "armed": False,
+    })
+    command = {
+        "kind": "blacknode.joint-command-request",
+        "schema_version": 1,
+        "joint_name": "shoulder_pan",
+        "servo_id": 1,
+        "position_rad": math.radians(25.0),
+        "issued_at": time.time(),
+        "requires_motion_authorization": True,
+    }
+
+    blocked = jm.set_joint_slider_command("servo_link", command)
+    assert blocked["ok"] is False
+    assert moves == []
+
+    jm.set_joint_slider_armed("servo_link", True)
+    accepted = jm.set_joint_slider_command("servo_link", command)
+    assert accepted["ok"] is True
+    assert moves[0]["shoulder_pan"] == pytest.approx(math.radians(25.0))
+
+    stale = jm.set_joint_slider_command(
+        "servo_link",
+        {**command, "issued_at": time.time() - 2.0},
+    )
+    assert stale["ok"] is False
+    assert "stale" in stale["report"]
+    assert len(moves) == 1
+
+
 def test_new_nodes_registered_with_category_and_package():
     for name in NEW_NODES:
         assert name in _NODE_REGISTRY, name
         assert _NODE_REGISTRY[name]._bn_category == "Motion"
         assert _NODE_REGISTRY[name]._bn_package == "blacknode-motion"
+    assert "command" in _NODE_REGISTRY["ROS2JointSliders"]._bn_inputs
 
 
 # --- ROS2SetJoint / ROS2JointState ------------------------------------------------

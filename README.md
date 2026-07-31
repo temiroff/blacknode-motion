@@ -48,6 +48,16 @@ The nested `arm/ros2` adapter provides `ROS2JointSliders`,
 arm execution gateway, which applies command ownership and motion safety before
 the ROS adapter publishes to a driver-owned endpoint.
 
+`RobotServo` uses the generic arm execution gateway for standalone local USB
+control. Its on-node **Arm** action selects the joint-motion provider from the
+robot profile, seeds every joint from fresh feedback, and keeps arbitration and
+calibrated bounds in the motion layer.
+
+`ROS2JointSliders.command` also accepts the canonical command request produced
+by a `RobotServo` for advanced workflows. Connect `command` to `command`, press
+**Go Live**, verify the reported joint and limits, and explicitly arm the
+motion node.
+
 Motion remains disarmed by default. Armed moves synchronize to current pose,
 apply calibrated limits, and preserve driver heartbeat safeguards.
 
@@ -56,7 +66,7 @@ UI or skill
     -> motion/arm execution gateway
     -> core ownership arbitration
     -> motion safety
-    -> Feetech or another concrete driver
+    -> profile-selected concrete driver
 ```
 
 UI and skill modules must not call a driver adapter or raw command publisher.

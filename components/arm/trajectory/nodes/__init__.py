@@ -8,4 +8,4 @@ __path__.append(
     str(Path(__file__).resolve().parents[2] / "execution" / "nodes")
 )
 
-from . import arm_controller, motion_profiles  # noqa: E402,F401
+from . import arm_controller, motion_profiles, servo_control  # noqa: E402,F401
