@@ -32,6 +32,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/temiroff/blacknode-robot.git core/packages/blacknode-robot
           git clone --depth 1 https://github.com/temiroff/blacknode-perception.git core/packages/blacknode-vision
+          git clone --depth 1 https://github.com/temiroff/blacknode-cuda.git core/packages/blacknode-cuda
           git clone --depth 1 https://github.com/temiroff/blacknode-dataset.git core/packages/blacknode-dataset
           git clone --depth 1 https://github.com/temiroff/blacknode-training.git core/packages/blacknode-training
       - name: Set up Python
@@ -70,6 +71,7 @@ jobs:
           PYTHONPATH: python
         shell: bash
         run: |
+          python -m blacknode.cli packages enable blacknode-perception camera
           python -m blacknode.cli packages enable blacknode-motion base --adapter ros2
           python -m blacknode.cli packages enable blacknode-motion policy --adapter ros2
           find ../package -path '*/templates/*.json' -print0 | while IFS= read -r -d '' template; do
