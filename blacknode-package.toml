@@ -1,6 +1,6 @@
 [package]
 name = "blacknode-motion"
-version = "0.6.1"
+version = "0.6.2"
 description = "Arm and base planning, trajectory generation, execution, policy, arbitration, and motion safety for Blacknode."
 requires-blacknode = ">=0.3.0"
 layer = "motion"
@@ -62,12 +62,26 @@ requires = [
 description = "Safety-gated mobile-base commands, scan checks, odometry, and stop over ROS 2 transports."
 default = false
 capabilities = ["adapter.motion.base.ros2"]
-nodes = ["components/base/adapters/ros2/nodes"]
-templates = ["components/base/adapters/ros2/templates"]
-node-types = ["BaseSafetyGate", "ROS2BaseMove", "ROS2BaseStop", "ROS2LaserScanCheck", "ROS2OdomState"]
+nodes = [
+  "components/base/adapters/ros2/nodes",
+  "components/base/planning/providers/nav2/nodes",
+]
+templates = [
+  "components/base/adapters/ros2/templates",
+  "components/base/planning/providers/nav2/templates",
+]
+node-types = [
+  "BaseSafetyGate", "NavigateTo", "NavigationSession", "ROS2BaseMove",
+  "ROS2BaseStop", "ROS2LaserScanCheck", "ROS2OdomState",
+]
 
 [components.base.adapters.ros2.dependencies]
-requires = [{ package = "blacknode-ros2", component = "rosbridge", version = ">=0.5.8,<1.0.0" }]
+pip = ["PyYAML>=6,<7"]
+imports = ["yaml"]
+requires = [
+  { package = "blacknode-ros2", component = "core", version = ">=0.6.2,<1.0.0" },
+  { package = "blacknode-ros2", component = "rosbridge", version = ">=0.5.8,<1.0.0" },
+]
 
 [components.policy]
 description = "Learned-policy motion planning, execution, and lifecycle contracts."

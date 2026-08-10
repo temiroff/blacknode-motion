@@ -1,0 +1,108 @@
+{
+  "kind": "blacknode.workflow",
+  "schema_version": 1,
+  "name": "ROSOrin Navigate Saved Map",
+  "saved_at": "2026-08-10T00:00:00",
+  "entrypoint": {
+    "node_id": "navigate",
+    "port": "report"
+  },
+  "metadata": {
+    "template": true,
+    "description": "Start a Blacknode-owned Nav2 session with the saved ROSOrin map and tuned DWB parameters, require current LiDAR clearance and explicit arming, apply a session speed limit, then navigate through a cancellable goal. Set armed=true only after selecting a safe goal and clearing the robot workspace.",
+    "color": "#f97316",
+    "required_packages": ["blacknode-motion", "blacknode-ros2"],
+    "required_components": ["blacknode-motion/base", "blacknode-ros2/core", "blacknode-ros2/rosbridge"],
+    "required_adapters": ["blacknode-motion/base@ros2"]
+  },
+  "node_meta": {
+    "navigation": {
+      "id": "navigation",
+      "type": "NavigationSession",
+      "params": {
+        "action": "start",
+        "lifecycle": "managed",
+        "run_id": "rosorin-nav2",
+        "action_name": "/navigate_to_pose",
+        "map_yaml": "/home/ubuntu/Blacknode/maps/map_01.yaml",
+        "params_file": "/home/ubuntu/ros2_ws/src/navigation/config/nav2_params.yaml",
+        "controller_params_file": "/home/ubuntu/ros2_ws/src/navigation/config/nav2_controller_dwb.yaml",
+        "launch_package": "nav2_bringup",
+        "launch_file": "bringup_launch.py",
+        "launch_arguments": "use_sim_time:=false autostart:=true",
+        "wait_seconds": 20.0
+      },
+      "pos": [40, 160],
+      "inputs": ["trigger", "action", "lifecycle", "run_id", "action_name", "map_artifact", "map_yaml", "params_file", "controller_params_file", "launch_package", "launch_file", "launch_arguments", "wait_seconds"],
+      "outputs": ["ready", "running", "owned", "provider", "report"],
+      "input_types": {
+        "trigger": "Any",
+        "action": "Enum",
+        "lifecycle": "Enum",
+        "run_id": "Text",
+        "action_name": "Text",
+        "map_artifact": "Dict",
+        "map_yaml": "Text",
+        "params_file": "Text",
+        "controller_params_file": "Text",
+        "launch_package": "Text",
+        "launch_file": "Text",
+        "launch_arguments": "Text",
+        "wait_seconds": "Float"
+      },
+      "output_types": {"ready": "Bool", "running": "Bool", "owned": "Bool", "provider": "Dict", "report": "Text"},
+      "input_defaults": {
+        "action": "status",
+        "lifecycle": "existing",
+        "run_id": "rosorin-nav2",
+        "action_name": "/navigate_to_pose",
+        "map_yaml": "",
+        "params_file": "",
+        "controller_params_file": "",
+        "launch_package": "nav2_bringup",
+        "launch_file": "bringup_launch.py",
+        "launch_arguments": "use_sim_time:=false autostart:=true",
+        "wait_seconds": 15.0
+      }
+    },
+    "scan": {
+      "id": "scan",
+      "type": "ROS2LaserScanCheck",
+      "params": {"host": "127.0.0.1", "port": 9090, "scan_topic": "/scan_raw", "sector_deg": 70.0, "min_clearance_m": 0.45, "timeout": 6.0},
+      "pos": [420, 40],
+      "inputs": ["trigger", "host", "port", "scan_topic", "sector_deg", "min_clearance_m", "timeout"],
+      "outputs": ["clearance_m", "clear", "samples", "report"],
+      "input_types": {"trigger": "Any", "host": "Text", "port": "Int", "scan_topic": "Text", "sector_deg": "Float", "min_clearance_m": "Float", "timeout": "Float"},
+      "output_types": {"clearance_m": "Float", "clear": "Bool", "samples": "Int", "report": "Text"},
+      "input_defaults": {"host": "127.0.0.1", "port": 9090, "scan_topic": "/scan", "sector_deg": 60.0, "min_clearance_m": 0.35, "timeout": 5.0}
+    },
+    "gate": {
+      "id": "gate",
+      "type": "BaseSafetyGate",
+      "params": {"armed": false, "max_speed_mps": 0.15, "max_turn_rps": 0.5, "max_duration_s": 1.5, "min_clearance_m": 0.45, "require_clearance": true, "emergency_stop": false},
+      "pos": [760, 160],
+      "inputs": ["armed", "max_speed_mps", "max_turn_rps", "max_duration_s", "min_clearance_m", "clearance_m", "require_clearance", "emergency_stop"],
+      "outputs": ["authorization", "authorized", "report"],
+      "input_types": {"armed": "Bool", "max_speed_mps": "Float", "max_turn_rps": "Float", "max_duration_s": "Float", "min_clearance_m": "Float", "clearance_m": "Float", "require_clearance": "Bool", "emergency_stop": "Bool"},
+      "output_types": {"authorization": "Dict", "authorized": "Bool", "report": "Text"},
+      "input_defaults": {"armed": false, "max_speed_mps": 0.2, "max_turn_rps": 0.6, "max_duration_s": 1.5, "min_clearance_m": 0.35, "clearance_m": -1.0, "require_clearance": false, "emergency_stop": false}
+    },
+    "navigate": {
+      "id": "navigate",
+      "type": "NavigateTo",
+      "params": {"action": "send", "goal_id": "rosorin-goal", "action_name": "/navigate_to_pose", "frame_id": "map", "x_m": 1.0, "y_m": 0.0, "yaw_deg": 0.0, "timeout_s": 180.0, "cmd_vel_topic": "/cmd_vel", "speed_limit_topic": "/speed_limit"},
+      "pos": [1120, 160],
+      "inputs": ["trigger", "action", "authorization", "goal_id", "action_name", "frame_id", "x_m", "y_m", "yaw_deg", "timeout_s", "cmd_vel_topic", "speed_limit_topic"],
+      "outputs": ["accepted", "running", "succeeded", "goal", "status", "report"],
+      "input_types": {"trigger": "Any", "action": "Enum", "authorization": "Dict", "goal_id": "Text", "action_name": "Text", "frame_id": "Text", "x_m": "Float", "y_m": "Float", "yaw_deg": "Float", "timeout_s": "Float", "cmd_vel_topic": "Text", "speed_limit_topic": "Text"},
+      "output_types": {"accepted": "Bool", "running": "Bool", "succeeded": "Bool", "goal": "Dict", "status": "Dict", "report": "Text"},
+      "input_defaults": {"action": "preview", "goal_id": "rosorin-goal", "action_name": "/navigate_to_pose", "frame_id": "map", "x_m": 0.0, "y_m": 0.0, "yaw_deg": 0.0, "timeout_s": 180.0, "cmd_vel_topic": "/cmd_vel", "speed_limit_topic": "/speed_limit"}
+    }
+  },
+  "edges": [
+    {"from": "navigation", "from_port": "provider", "to": "scan", "to_port": "trigger"},
+    {"from": "scan", "from_port": "clearance_m", "to": "gate", "to_port": "clearance_m"},
+    {"from": "navigation", "from_port": "provider", "to": "navigate", "to_port": "trigger"},
+    {"from": "gate", "from_port": "authorization", "to": "navigate", "to_port": "authorization"}
+  ]
+}
