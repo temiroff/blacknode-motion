@@ -76,6 +76,8 @@ node-types = [
 ]
 
 [components.base.adapters.ros2.dependencies]
+pip = ["PyYAML>=6,<7"]
+imports = ["yaml"]
 requires = [
   { package = "blacknode-ros2", component = "core", version = ">=0.6.2,<1.0.0" },
   { package = "blacknode-ros2", component = "rosbridge", version = ">=0.5.8,<1.0.0" },
