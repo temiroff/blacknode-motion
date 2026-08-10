@@ -20,6 +20,7 @@
 - The arm ROS 2 adapter provides joint state, sliders, dashboards, manual moves, and bounded joint commands.
 - The base ROS 2 adapter provides bounded base moves, stop, odometry, and LaserScan safety checks.
 - The policy adapter starts in prediction preview and requires a separate arm action before commands can flow.
+- Simulation providers can evaluate compatible normalized joint-delta PPO artifacts. The artifact and provider must both declare `simulation_only`; physical providers reject this action contract.
 
 Applications and skills submit requests through the motion gateway. The gateway applies ownership, freshness, limits, and authorization before a profile-selected driver receives a command.
 

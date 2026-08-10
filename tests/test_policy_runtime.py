@@ -47,6 +47,17 @@ def _robot(*, calibrated: bool = True) -> dict:
     }
 
 
+def _ppo_artifact() -> dict:
+    return {
+        "kind": "blacknode.policy-artifact", "schema_version": 1,
+        "policy_type": "ppo-so101-reach", "backend": "blacknode-native",
+        "action_mode": "bounded_joint_position_delta", "units": "normalized",
+        "joint_names": ["shoulder", "gripper"], "camera_names": [],
+        "state_dim": 9, "action_dim": 2, "path": "ignored-by-fake-loader",
+        "safety": {"simulation_only": True, "physical_motion_authorized": False},
+    }
+
+
 def _cameras() -> list[dict]:
     return [{"kind": "blacknode.frame-stream", "schema_version": 1, "stream_id": "front", "snapshot_url": "http://camera/snapshot.jpg"}]
 
@@ -76,6 +87,20 @@ def test_contract_requires_calibration_and_exact_camera_and_joint_order():
         policy_runtime.validate_deployment_contract(_artifact(), _robot(), [], _safety())
 
 
+def test_normalized_delta_policy_is_accepted_only_for_simulation_provider():
+    simulator = _robot()
+    simulator["driver"]["simulation_only"] = True
+    contract = policy_runtime.validate_deployment_contract(
+        _ppo_artifact(), simulator, [], _safety()
+    )
+    assert contract["simulation_only"]
+    assert contract["camera_names"] == []
+    with pytest.raises(ValueError, match="simulation-only"):
+        policy_runtime.validate_deployment_contract(
+            _ppo_artifact(), _robot(), [], _safety()
+        )
+
+
 def test_safety_gate_clamps_joint_velocity_and_workspace():
     contract = policy_runtime.validate_deployment_contract(_artifact(), _robot(), _cameras(), _safety())
     gate = policy_runtime.SafetyGate(contract["joint_names"], contract["joint_specs"], _safety())
@@ -92,9 +117,10 @@ def test_safety_gate_clamps_joint_velocity_and_workspace():
 
 
 class _FakePolicy:
-    def predict(self, qpos, images):
+    def predict(self, qpos, images, context=None):
         assert qpos == [0.0, 0.0]
         assert images["front"].shape == (8, 8, 3)
+        assert context["pose_age"] == 0.01
         return {"kind": "blacknode.policy-prediction", "joint_names": ["shoulder", "gripper"], "action": [1.0, 0.5]}
 
 

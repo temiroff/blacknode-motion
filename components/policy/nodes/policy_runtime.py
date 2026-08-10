@@ -66,12 +66,35 @@ def validate_deployment_contract(
 ) -> dict[str, Any]:
     if artifact.get("kind") != "blacknode.policy-artifact":
         raise ValueError("connect a blacknode.policy-artifact")
-    if artifact.get("action_mode") != "absolute_joint_position" or artifact.get("units") != "radians":
-        raise ValueError("policy must emit absolute joint positions in radians")
+    action_mode = str(artifact.get("action_mode") or "")
+    units = str(artifact.get("units") or "")
+    simulator_delta_policy = (
+        action_mode == "bounded_joint_position_delta" and units == "normalized"
+    )
+    if not simulator_delta_policy and (
+        action_mode != "absolute_joint_position" or units != "radians"
+    ):
+        raise ValueError(
+            "policy must emit absolute joint positions in radians or a supported "
+            "simulation-only normalized joint delta"
+        )
     joint_names = [str(name) for name in artifact.get("joint_names") or []]
     camera_names = [str(name) for name in artifact.get("camera_names") or []]
-    if not joint_names or not camera_names:
-        raise ValueError("policy artifact must declare ordered joints and cameras")
+    if not joint_names:
+        raise ValueError("policy artifact must declare ordered joints")
+    driver = robot.get("driver") if isinstance(robot.get("driver"), dict) else {}
+    if simulator_delta_policy:
+        artifact_safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        if (
+            artifact_safety.get("simulation_only") is not True
+            or artifact_safety.get("physical_motion_authorized") is not False
+            or driver.get("simulation_only") is not True
+        ):
+            raise ValueError(
+                "normalized joint-delta policies require a simulation-only artifact and provider"
+            )
+    elif not camera_names:
+        raise ValueError("absolute joint-position policy artifact must declare ordered cameras")
     specs = _robot_joint_specs(robot)
     if list(specs) != joint_names:
         raise ValueError(
@@ -79,7 +102,6 @@ def validate_deployment_contract(
             f"robot={list(specs)}, policy={joint_names}"
         )
     _camera_handles(camera_streams, camera_names)
-    driver = robot.get("driver") if isinstance(robot.get("driver"), dict) else {}
     if not bool(driver.get("running")):
         raise ValueError("robot driver is not running")
     if bool(safety.get("require_calibration", True)) and not str(driver.get("calibration_path") or "").strip():
@@ -95,6 +117,9 @@ def validate_deployment_contract(
     return {
         "joint_names": joint_names,
         "camera_names": camera_names,
+        "policy_type": str(artifact.get("policy_type") or ""),
+        "action_mode": action_mode,
+        "simulation_only": simulator_delta_policy,
         "joint_specs": specs,
         "host": str(robot.get("host") or driver.get("host") or "127.0.0.1"),
         "port": int(robot.get("port") or driver.get("port") or 9090),
@@ -272,9 +297,13 @@ class RosbridgePolicyIO:
 
 def _load_policy(artifact: dict[str, Any], device: str) -> Any:
     try:
+        if artifact.get("policy_type") == "ppo-so101-reach":
+            from blacknode.pkg.blacknode_training.ppo_runtime import PPOPolicy
+
+            return PPOPolicy(artifact, device)
         from blacknode.pkg.blacknode_training.runtime import ACTPolicy
     except Exception as exc:
-        raise RuntimeError("blacknode-training is required to load the ACT policy artifact") from exc
+        raise RuntimeError("blacknode-training is required to load the policy artifact") from exc
     return ACTPolicy(artifact, device)
 
 
@@ -396,7 +425,7 @@ class PolicyRun:
         pose = dict(snapshot["pose"])
         qpos = [pose[name] for name in self.contract["joint_names"]]
         started = time.perf_counter()
-        prediction = self.policy.predict(qpos, snapshot["images"])
+        prediction = self.policy.predict(qpos, snapshot["images"], context=snapshot)
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         now = time.monotonic()
         dt = now - self.last_command_at if self.last_command_at else 1.0 / max(1.0, float(self.safety.get("loop_hz") or 10.0))
