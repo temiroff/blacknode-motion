@@ -18,7 +18,7 @@
 
 - `JointMotionProfile` creates direct, linear, trapezoidal, or minimum-jerk joint trajectories.
 - The arm ROS 2 adapter provides joint state, sliders, dashboards, manual moves, and bounded joint commands.
-- The base ROS 2 adapter provides bounded base moves, stop, odometry, and LaserScan safety checks.
+- The base ROS 2 adapter provides bounded base moves, stop, odometry, LaserScan safety checks, session-scoped Nav2, and cancellable `NavigateTo` goals.
 - The policy adapter starts in prediction preview and requires a separate arm action before commands can flow.
 - Simulation providers can evaluate compatible normalized joint-delta PPO artifacts. The artifact and provider must both declare `simulation_only`; physical providers reject this action contract.
 
@@ -30,6 +30,22 @@ Applications and skills submit requests through the motion gateway. The gateway 
 - The first armed target synchronizes to current feedback.
 - Stale state, emergency stop, faults, takeover, or shutdown suppress commands.
 - Driver-level clamping and physical emergency stops remain independent safety layers.
+
+## ROSOrin navigation
+
+`NavigationSession` attaches to an existing `/navigate_to_pose` server or can
+start a separately configured Blacknode-owned `nav2_bringup` process.
+The ROSOrin workflow creates a Blacknode-owned parameter overlay from its main
+Nav2 and DWB controller YAML files, then launches Nav2 against the saved map.
+The source vendor files and base-driver lifecycle remain unchanged. `NavigateTo` begins in preview mode and accepts a goal
+only with a fresh `BaseSafetyGate` authorization. The managed goal client
+cancels its own goal on timeout, explicit cancel, Runtime shutdown, or workflow
+replacement. It applies the authorization's linear-speed cap through Nav2 and
+restores the provider maximum when the goal finishes.
+
+The `ROSOrin Navigate Saved Map` workflow starts disarmed. Set its map path and
+goal, confirm the LiDAR clearance, and then explicitly arm the gate. Stopping
+the workflow leaves the vendor ROS workspace and boot services unchanged.
 
 ## Install and verify
 
