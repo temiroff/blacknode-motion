@@ -8,11 +8,15 @@ def test_motion_layer_exposes_domain_components():
     assert info.ok
     assert info.layer == "motion"
     assert info.component_mode is True
-    assert info.enabled_components == ["core", "arm", "policy", "safety"]
+    expected_enabled = ["core", "arm", "policy", "safety"]
+    if info.components["base"]["enabled"]:
+        expected_enabled.insert(2, "base")
+    assert info.enabled_components == expected_enabled
     assert set(info.components) == {"core", "arm", "base", "policy", "safety"}
     assert info.components["core"]["internal"] is True
     assert info.components["arm"]["aliases"] == ["joint-control"]
     assert info.components["base"]["aliases"] == ["mobile-base"]
+    assert info.components["base"]["default"] is False
     for component_name in ("arm", "base", "policy"):
         assert info.components[component_name]["requirements"] == [
             {
