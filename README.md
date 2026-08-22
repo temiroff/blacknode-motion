@@ -18,7 +18,7 @@
 
 - `JointMotionProfile` creates direct, linear, trapezoidal, or minimum-jerk joint trajectories.
 - The arm ROS 2 adapter provides joint state, sliders, dashboards, manual moves, and bounded joint commands.
-- The base ROS 2 adapter provides bounded base moves, stop, odometry, LaserScan safety checks, session-scoped Nav2, and cancellable `NavigateTo` goals.
+- The base ROS 2 adapter provides bounded base moves, stop, odometry, LaserScan safety checks, session-scoped Nav2, cancellable `NavigateTo` goals, and managed frontier exploration over a live SLAM map.
 - The policy adapter starts in prediction preview and requires a separate arm action before commands can flow.
 - Simulation providers can evaluate compatible normalized joint-delta PPO artifacts. The artifact and provider must both declare `simulation_only`; physical providers reject this action contract.
 
@@ -46,6 +46,24 @@ restores the provider maximum when the goal finishes.
 The `ROSOrin Navigate Saved Map` workflow starts disarmed. Set its map path and
 goal, confirm the LiDAR clearance, and then explicitly arm the gate. Stopping
 the workflow leaves the vendor ROS workspace and boot services unchanged.
+
+## Autonomous environment familiarization
+
+`ExploreEnvironment` selects boundaries between known free space and unknown
+space from the live occupancy grid, asks Nav2 to reach safe candidates, and
+continues until no usable frontier remains. The managed worker requires a fresh
+`BaseSafetyGate` authorization before it starts and continuously checks map,
+LiDAR, and localization freshness. It cancels the active goal and publishes a
+zero velocity when those inputs become stale, an obstacle violates the direct
+clearance threshold, the operator pauses or stops the session, or Runtime shuts
+down.
+
+When exploration completes, the worker saves the SLAM Toolbox occupancy map and
+pose graph, verifies the `map` to `base_link` transform, and reports:
+`Environment mapped. Localization ready. Waiting for command.` The
+`ROSOrin Familiarize Environment` workflow starts SLAM, brings up Nav2 in
+live-SLAM mode, checks current LiDAR clearance, and starts exploration only
+after its safety gate is explicitly armed.
 
 ## Install and verify
 

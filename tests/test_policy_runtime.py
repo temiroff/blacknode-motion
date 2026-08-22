@@ -114,6 +114,15 @@ def test_safety_gate_clamps_joint_velocity_and_workspace():
     blocked = workspace_gate.apply([0.0, 0.0], {"shoulder": 0.0, "gripper": 0.0}, dt=0.1, workspace={"x": 0.8, "y": 0.0, "z": 0.2})
     assert not blocked["ok"]
     assert "workspace x" in blocked["reason"]
+    rejecting_gate = policy_runtime.SafetyGate(
+        contract["joint_names"], contract["joint_specs"],
+        {**_safety(), "reject_on_clamp": True},
+    )
+    rejected = rejecting_gate.apply(
+        [math.pi, -1.0], {"shoulder": 0.0, "gripper": 0.0}, dt=0.1
+    )
+    assert not rejected["ok"]
+    assert "requires safety clamping" in rejected["reason"]
 
 
 class _FakePolicy:
@@ -156,6 +165,56 @@ class _RejectHoldIO(_FakeIO):
         return {"ok": action != "exit_teach", "error": "hold rejected"}
 
 
+class _FakeOpenPIClient:
+    def __init__(self, _host, _port, _timeout):
+        self.metadata = {"action_horizon": 4}
+        self.calls = 0
+
+    def infer(self, observation):
+        self.calls += 1
+        assert observation["observation/image"].shape == (224, 224, 3)
+        assert observation["observation/state"].shape == (2,)
+        assert observation["observation/state"] == pytest.approx([1.0, -1.0])
+        return {"actions": np.tile([1.0 + 0.2 * self.calls, -0.6], (4, 1)).astype(np.float32)}
+
+    def close(self):
+        return None
+
+
+def _openpi_artifact(*, authorized=False):
+    return {
+        **_artifact(),
+        "policy_type": "openpi-pi05", "backend": "openpi-remote",
+        "physical_motion_authorized": authorized,
+        "joint_calibration": {
+            "kind": "affine_robot_to_policy",
+            "joint_names": ["shoulder", "gripper"],
+            "robot_to_policy_scale": [2.0, -2.0],
+            "robot_to_policy_offset": [1.0, -1.0],
+        },
+        "server": {
+            "host": "127.0.0.1", "port": 8000, "prompt": "Pick up the cube.",
+            "action_horizon": 4, "execute_actions_per_replan": 3,
+            "async_replan_after_actions": 1, "image_size": 224,
+            "image_camera": "front", "wrist_camera": "", "timeout_s": 1.0,
+        },
+    }
+
+
+def test_openpi_remote_policy_prefetches_real_action_chunks():
+    policy = policy_runtime.OpenPIRemotePolicy(
+        _openpi_artifact(), client_factory=_FakeOpenPIClient
+    )
+    image = np.zeros((480, 640, 3), dtype=np.uint8)
+    first = policy.predict([0.0, 0.0], {"front": image})
+    assert first["action"] == pytest.approx([0.1, -0.2])
+    assert first["backend"] == "openpi-remote"
+    policy.future.result(timeout=1.0)
+    second = policy.predict([0.0, 0.0], {"front": image})
+    assert second["action"] == pytest.approx([0.2, -0.2])
+    policy.close()
+
+
 def test_disarmed_preview_arm_sync_estop_and_replay_log(tmp_path: Path):
     run = policy_runtime.PolicyRun(
         "test", _artifact(), _robot(), _cameras(), _safety(tmp_path), device="cpu",
@@ -189,3 +248,15 @@ def test_arm_fails_closed_when_driver_rejects_hold(tmp_path: Path):
         run.control("arm")
     assert not run.armed
     assert not run.io.commands
+
+
+def test_openpi_preview_cannot_arm_before_physical_authorization(tmp_path: Path):
+    run = policy_runtime.PolicyRun(
+        "openpi-candidate", _openpi_artifact(authorized=False), _robot(),
+        _cameras(), _safety(tmp_path), device="cpu",
+        policy_loader=lambda _artifact, _device: _FakePolicy(), io_factory=_FakeIO,
+    )
+    run.phase = "preview"
+    with pytest.raises(RuntimeError, match="not been authorized"):
+        run.control("arm")
+    assert not run.armed

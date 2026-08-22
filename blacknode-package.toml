@@ -1,6 +1,6 @@
 [package]
 name = "blacknode-motion"
-version = "0.6.2"
+version = "0.6.3"
 description = "Arm and base planning, trajectory generation, execution, policy, arbitration, and motion safety for Blacknode."
 requires-blacknode = ">=0.3.0"
 layer = "motion"
@@ -71,7 +71,7 @@ templates = [
   "components/base/planning/providers/nav2/templates",
 ]
 node-types = [
-  "BaseSafetyGate", "NavigateTo", "NavigationSession", "ROS2BaseMove",
+  "BaseSafetyGate", "ExploreEnvironment", "NavigateTo", "NavigationSession", "ROS2BaseMove",
   "ROS2BaseStop", "ROS2LaserScanCheck", "ROS2OdomState",
 ]
 
@@ -90,8 +90,8 @@ capabilities = ["motion.policy"]
 nodes = ["components/policy/nodes"]
 
 [components.policy.dependencies]
-pip = ["numpy>=1.24", "pillow>=10"]
-imports = ["numpy", "PIL"]
+pip = ["numpy>=1.24", "pillow>=10", "msgpack>=1.0.5", "websockets>=11"]
+imports = ["numpy", "PIL", "msgpack", "websockets"]
 requires = [
   { component = "core", version = ">=0.6.0,<1.0.0" },
   { component = "safety", version = ">=0.6.0,<1.0.0" },

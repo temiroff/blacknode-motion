@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+import concurrent.futures
 import io
 import json
 import math
@@ -29,6 +30,13 @@ try:
     from PIL import Image as PILImage
 except Exception:  # pragma: no cover - package health reports this
     PILImage = None
+
+try:
+    import msgpack
+    import websockets.sync.client as websocket_client
+except Exception:  # pragma: no cover - package health reports this
+    msgpack = None
+    websocket_client = None
 
 
 def _finite(value: Any) -> float | None:
@@ -118,6 +126,7 @@ def validate_deployment_contract(
         "joint_names": joint_names,
         "camera_names": camera_names,
         "policy_type": str(artifact.get("policy_type") or ""),
+        "physical_motion_authorized": artifact.get("physical_motion_authorized") is not False,
         "action_mode": action_mode,
         "simulation_only": simulator_delta_policy,
         "joint_specs": specs,
@@ -183,6 +192,11 @@ class SafetyGate:
                 bounded = current_value + math.copysign(allowed_delta, delta)
                 clamped.append(f"{name}:velocity")
             action[name] = bounded
+        if clamped and bool(self.config.get("reject_on_clamp", False)):
+            return {
+                "ok": False, "action": {}, "clamped": clamped,
+                "reason": "raw policy action requires safety clamping",
+            }
         return {"ok": True, "action": action, "clamped": clamped, "reason": ""}
 
 
@@ -295,7 +309,228 @@ class RosbridgePolicyIO:
                 pass
 
 
+def _pack_openpi_array(value: Any) -> Any:
+    if np is not None and isinstance(value, np.ndarray):
+        if value.dtype.kind in ("V", "O", "c"):
+            raise ValueError(f"unsupported OpenPI array dtype: {value.dtype}")
+        return {
+            b"__ndarray__": True, b"data": value.tobytes(),
+            b"dtype": value.dtype.str, b"shape": value.shape,
+        }
+    if np is not None and isinstance(value, np.generic):
+        return {
+            b"__npgeneric__": True, b"data": value.item(),
+            b"dtype": value.dtype.str,
+        }
+    return value
+
+
+def _unpack_openpi_array(value: dict) -> Any:
+    if np is not None and b"__ndarray__" in value:
+        return np.ndarray(
+            buffer=value[b"data"], dtype=np.dtype(value[b"dtype"]),
+            shape=value[b"shape"],
+        )
+    if np is not None and b"__npgeneric__" in value:
+        return np.dtype(value[b"dtype"]).type(value[b"data"])
+    return value
+
+
+class _OpenPIWireClient:
+    def __init__(self, host: str, port: int, timeout: float) -> None:
+        if msgpack is None or websocket_client is None:
+            raise RuntimeError("msgpack and websockets are required for OpenPI remote inference")
+        self.connection = websocket_client.connect(
+            f"ws://{host}:{port}", compression=None, max_size=None,
+            open_timeout=timeout, close_timeout=timeout,
+        )
+        self.packer = msgpack.Packer(default=_pack_openpi_array)
+        self.metadata = msgpack.unpackb(
+            self.connection.recv(), object_hook=_unpack_openpi_array
+        )
+
+    def infer(self, observation: dict[str, Any]) -> dict[str, Any]:
+        self.connection.send(self.packer.pack(observation))
+        response = self.connection.recv()
+        if isinstance(response, str):
+            raise RuntimeError(f"OpenPI inference server error: {response}")
+        return msgpack.unpackb(response, object_hook=_unpack_openpi_array)
+
+    def close(self) -> None:
+        self.connection.close()
+
+
+class OpenPIRemotePolicy:
+    """Asynchronous action-chunk adapter for an official OpenPI server."""
+
+    def __init__(
+        self,
+        artifact: dict[str, Any],
+        _device: str = "auto",
+        *,
+        client_factory: Callable[[str, int, float], Any] = _OpenPIWireClient,
+    ) -> None:
+        del _device
+        if np is None or PILImage is None:
+            raise RuntimeError("numpy and Pillow are required for OpenPI inference")
+        self.info = dict(artifact)
+        server = artifact.get("server") if isinstance(artifact.get("server"), dict) else {}
+        self.prompt = str(server.get("prompt") or artifact.get("task") or "").strip()
+        if not self.prompt:
+            raise ValueError("OpenPI artifact must declare server.prompt")
+        self.horizon = int(server.get("action_horizon") or 0)
+        self.execute_count = int(server.get("execute_actions_per_replan") or 0)
+        self.async_start = int(server.get("async_replan_after_actions") or 0)
+        if not 1 <= self.async_start <= self.execute_count <= self.horizon:
+            raise ValueError("invalid OpenPI action-chunk schedule")
+        self.image_size = int(server.get("image_size") or 224)
+        cameras = list(artifact.get("camera_names") or [])
+        self.image_camera = str(server.get("image_camera") or cameras[0])
+        self.wrist_camera = str(server.get("wrist_camera") or "").strip()
+        if self.image_camera not in cameras:
+            raise ValueError("OpenPI image_camera is not declared in camera_names")
+        if self.wrist_camera and self.wrist_camera not in cameras:
+            raise ValueError("OpenPI wrist_camera is not declared in camera_names")
+        calibration = artifact.get("joint_calibration")
+        if not isinstance(calibration, dict) or calibration.get("kind") != "affine_robot_to_policy":
+            raise ValueError("OpenPI artifact requires affine_robot_to_policy joint_calibration")
+        joint_names = list(artifact.get("joint_names") or [])
+        if list(calibration.get("joint_names") or []) != joint_names:
+            raise ValueError("OpenPI joint calibration order does not match artifact joint_names")
+        self.robot_to_policy_scale = np.asarray(
+            calibration.get("robot_to_policy_scale"), dtype=np.float32
+        )
+        self.robot_to_policy_offset = np.asarray(
+            calibration.get("robot_to_policy_offset"), dtype=np.float32
+        )
+        expected_calibration_shape = (len(joint_names),)
+        if (
+            self.robot_to_policy_scale.shape != expected_calibration_shape
+            or self.robot_to_policy_offset.shape != expected_calibration_shape
+            or not np.isfinite(self.robot_to_policy_scale).all()
+            or not np.isfinite(self.robot_to_policy_offset).all()
+            or np.any(np.abs(self.robot_to_policy_scale) < 1e-4)
+        ):
+            raise ValueError("OpenPI joint calibration is invalid or non-invertible")
+        timeout = max(0.1, float(server.get("timeout_s") or 10.0))
+        self.client = client_factory(
+            str(server.get("host") or "127.0.0.1"),
+            int(server.get("port") or 8000), timeout,
+        )
+        metadata = dict(getattr(self.client, "metadata", {}) or {})
+        advertised = metadata.get("action_horizon")
+        if advertised is not None and int(advertised) != self.horizon:
+            raise ValueError(
+                f"OpenPI server horizon {advertised} does not match artifact {self.horizon}"
+            )
+        self.executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="blacknode-openpi"
+        )
+        self.lock = threading.RLock()
+        self.chunk: np.ndarray | None = None
+        self.index = 0
+        self.future: concurrent.futures.Future | None = None
+        self.last_action: np.ndarray | None = None
+
+    def _image(self, value: Any) -> np.ndarray:
+        image = np.asarray(value, dtype=np.uint8)
+        if image.ndim != 3 or image.shape[-1] != 3:
+            raise ValueError(f"OpenPI camera image must be HWC RGB, got {image.shape}")
+        if image.shape[:2] == (self.image_size, self.image_size):
+            return image
+        pil = PILImage.fromarray(image)
+        width, height = pil.size
+        ratio = max(width / self.image_size, height / self.image_size)
+        resized = pil.resize(
+            (int(width / ratio), int(height / ratio)), resample=PILImage.Resampling.BILINEAR
+        )
+        canvas = PILImage.new("RGB", (self.image_size, self.image_size), 0)
+        canvas.paste(
+            resized,
+            ((self.image_size - resized.width) // 2, (self.image_size - resized.height) // 2),
+        )
+        return np.asarray(canvas, dtype=np.uint8)
+
+    def _infer(self, qpos: list[float], images: dict[str, Any]) -> np.ndarray:
+        robot_state = np.asarray(qpos, dtype=np.float32)
+        policy_state = (
+            robot_state * self.robot_to_policy_scale + self.robot_to_policy_offset
+        )
+        observation = {
+            "observation/image": self._image(images[self.image_camera]),
+            "observation/state": policy_state,
+            "prompt": self.prompt,
+        }
+        if self.wrist_camera:
+            observation["observation/wrist_image"] = self._image(images[self.wrist_camera])
+        result = self.client.infer(observation)
+        actions = np.asarray(result["actions"], dtype=np.float32)
+        expected = (self.horizon, len(self.info["joint_names"]))
+        if actions.shape != expected or not np.isfinite(actions).all():
+            raise RuntimeError(
+                f"OpenPI returned invalid action chunk {actions.shape}; expected {expected}"
+            )
+        return (
+            (actions - self.robot_to_policy_offset) / self.robot_to_policy_scale
+        ).astype(np.float32)
+
+    def _accept_finished_future(self) -> None:
+        if self.future is not None and self.future.done():
+            self.chunk = self.future.result()
+            self.future = None
+            self.index = 0
+
+    def predict(
+        self,
+        qpos: list[float],
+        images: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del context
+        with self.lock:
+            self._accept_finished_future()
+            if self.chunk is None:
+                self.chunk = self._infer(qpos, images)
+                self.index = 0
+            waiting = self.index >= self.execute_count
+            if waiting:
+                action = self.last_action if self.last_action is not None else self.chunk[-1]
+            else:
+                action = self.chunk[self.index]
+                self.last_action = action.copy()
+                self.index += 1
+            if self.index >= self.async_start and self.future is None:
+                qcopy = [float(value) for value in qpos]
+                icopy = {name: np.asarray(value).copy() for name, value in images.items()}
+                self.future = self.executor.submit(self._infer, qcopy, icopy)
+            return {
+                "kind": "blacknode.policy-prediction",
+                "schema_version": 1,
+                "joint_names": list(self.info["joint_names"]),
+                "action": np.asarray(action, dtype=float).tolist(),
+                "chunk_index": int(self.index),
+                "chunk_waiting": bool(waiting),
+                "backend": "openpi-remote",
+            }
+
+    def reset(self) -> None:
+        with self.lock:
+            if self.future is not None:
+                if not self.future.cancel():
+                    self.future.result()
+            self.future = None
+            self.chunk = None
+            self.index = 0
+            self.last_action = None
+
+    def close(self) -> None:
+        self.executor.shutdown(wait=True, cancel_futures=True)
+        self.client.close()
+
+
 def _load_policy(artifact: dict[str, Any], device: str) -> Any:
+    if artifact.get("policy_type") == "openpi-pi05" and artifact.get("backend") == "openpi-remote":
+        return OpenPIRemotePolicy(artifact, device)
     try:
         if artifact.get("policy_type") == "ppo-so101-reach":
             from blacknode.pkg.blacknode_training.ppo_runtime import PPOPolicy
@@ -381,6 +616,8 @@ class PolicyRun:
                     raise RuntimeError("reset human takeover before arming")
                 if self.phase not in {"preview", "running"}:
                     raise RuntimeError("policy runtime is not ready to arm")
+                if not self.contract["physical_motion_authorized"]:
+                    raise RuntimeError("policy artifact has not been authorized for physical motion")
                 result = self.io.control("exit_teach")
                 if isinstance(result, dict) and not result.get("ok", False):
                     raise RuntimeError(str(result.get("error") or "robot driver rejected hold request"))
@@ -498,6 +735,12 @@ class PolicyRun:
         if self.thread.is_alive() and self.thread is not threading.current_thread():
             self.thread.join(timeout=3.0)
         self.io.close()
+        try:
+            close_policy = getattr(self.policy, "close", None)
+            if callable(close_policy):
+                close_policy()
+        except Exception:
+            pass
 
     def status(self) -> dict[str, Any]:
         with self.lock:

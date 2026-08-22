@@ -1,0 +1,79 @@
+{
+  "kind": "blacknode.workflow",
+  "schema_version": 1,
+  "name": "ROSOrin Familiarize Environment",
+  "saved_at": "2026-08-13T00:00:00",
+  "entrypoint": {"node_id": "explore", "port": "report"},
+  "metadata": {
+    "template": true,
+    "description": "Build a live SLAM map, navigate safe unexplored frontiers, save the completed environment, verify localization, and become ready for navigation commands. Motion remains disarmed until the operator sets the safety gate's armed input to true after clearing the workspace.",
+    "color": "#f97316",
+    "required_packages": ["blacknode-motion", "blacknode-perception", "blacknode-ros2"],
+    "required_components": ["blacknode-motion/base", "blacknode-perception/slam", "blacknode-ros2/core", "blacknode-ros2/rosbridge"],
+    "required_adapters": ["blacknode-motion/base@ros2", "blacknode-perception/slam@ros2"]
+  },
+  "node_meta": {
+    "mapping": {
+      "id": "mapping",
+      "type": "MapEnvironment",
+      "params": {"action": "start", "lifecycle": "managed", "run_id": "rosorin-familiarize-map", "map_topic": "/map", "params_file": "/home/ubuntu/ros2_ws/src/slam/config/slam.yaml", "launch_package": "slam_toolbox", "launch_file": "online_sync_launch.py", "launch_arguments": "use_sim_time:=false", "wait_seconds": 15.0, "save_directory": "/home/ubuntu/Blacknode/maps", "map_name": "environment", "save_map_service": "/slam_toolbox/save_map", "serialize_service": "/slam_toolbox/serialize_map", "serialize_pose_graph": true, "service_timeout": 30.0},
+      "pos": [40, 180],
+      "inputs": ["trigger", "action", "lifecycle", "run_id", "map_topic", "params_file", "launch_package", "launch_file", "launch_arguments", "wait_seconds", "save_directory", "map_name", "save_map_service", "serialize_service", "serialize_pose_graph", "service_timeout"],
+      "outputs": ["ready", "running", "owned", "provider", "map_artifact", "report"],
+      "input_types": {"trigger": "Any", "action": "Enum", "lifecycle": "Enum", "run_id": "Text", "map_topic": "Text", "params_file": "Text", "launch_package": "Text", "launch_file": "Text", "launch_arguments": "Text", "wait_seconds": "Float", "save_directory": "Text", "map_name": "Text", "save_map_service": "Text", "serialize_service": "Text", "serialize_pose_graph": "Bool", "service_timeout": "Float"},
+      "output_types": {"ready": "Bool", "running": "Bool", "owned": "Bool", "provider": "Dict", "map_artifact": "Dict", "report": "Text"},
+      "input_defaults": {"action": "status", "lifecycle": "existing", "run_id": "rosorin-map", "map_topic": "/map", "params_file": "", "launch_package": "slam_toolbox", "launch_file": "online_sync_launch.py", "launch_arguments": "use_sim_time:=false", "wait_seconds": 10.0, "save_directory": "~/Blacknode/maps", "map_name": "map_01", "save_map_service": "/slam_toolbox/save_map", "serialize_service": "/slam_toolbox/serialize_map", "serialize_pose_graph": true, "service_timeout": 30.0}
+    },
+    "navigation": {
+      "id": "navigation",
+      "type": "NavigationSession",
+      "params": {"action": "start", "lifecycle": "managed", "map_mode": "live_slam", "run_id": "rosorin-familiarize-nav2", "action_name": "/navigate_to_pose", "map_yaml": "", "params_file": "/home/ubuntu/ros2_ws/src/navigation/config/nav2_params.yaml", "controller_params_file": "/home/ubuntu/ros2_ws/src/navigation/config/nav2_controller_dwb.yaml", "launch_package": "nav2_bringup", "launch_file": "navigation_launch.py", "launch_arguments": "use_sim_time:=false autostart:=true", "wait_seconds": 20.0},
+      "pos": [380, 180],
+      "inputs": ["trigger", "action", "lifecycle", "map_mode", "run_id", "action_name", "map_artifact", "map_yaml", "params_file", "controller_params_file", "launch_package", "launch_file", "launch_arguments", "wait_seconds"],
+      "outputs": ["ready", "running", "owned", "provider", "report"],
+      "input_types": {"trigger": "Any", "action": "Enum", "lifecycle": "Enum", "map_mode": "Enum", "run_id": "Text", "action_name": "Text", "map_artifact": "Dict", "map_yaml": "Text", "params_file": "Text", "controller_params_file": "Text", "launch_package": "Text", "launch_file": "Text", "launch_arguments": "Text", "wait_seconds": "Float"},
+      "output_types": {"ready": "Bool", "running": "Bool", "owned": "Bool", "provider": "Dict", "report": "Text"},
+      "input_defaults": {"action": "status", "lifecycle": "existing", "map_mode": "saved", "run_id": "rosorin-nav2", "action_name": "/navigate_to_pose", "map_yaml": "", "params_file": "", "controller_params_file": "", "launch_package": "nav2_bringup", "launch_file": "bringup_launch.py", "launch_arguments": "use_sim_time:=false autostart:=true", "wait_seconds": 15.0}
+    },
+    "scan": {
+      "id": "scan",
+      "type": "ROS2LaserScanCheck",
+      "params": {"host": "127.0.0.1", "port": 9090, "scan_topic": "/scan_raw", "sector_deg": 80.0, "min_clearance_m": 0.45, "timeout": 6.0},
+      "pos": [730, 40],
+      "inputs": ["trigger", "host", "port", "scan_topic", "sector_deg", "min_clearance_m", "timeout"],
+      "outputs": ["clearance_m", "clear", "samples", "report"],
+      "input_types": {"trigger": "Any", "host": "Text", "port": "Int", "scan_topic": "Text", "sector_deg": "Float", "min_clearance_m": "Float", "timeout": "Float"},
+      "output_types": {"clearance_m": "Float", "clear": "Bool", "samples": "Int", "report": "Text"},
+      "input_defaults": {"host": "127.0.0.1", "port": 9090, "scan_topic": "/scan", "sector_deg": 60.0, "min_clearance_m": 0.35, "timeout": 5.0}
+    },
+    "gate": {
+      "id": "gate",
+      "type": "BaseSafetyGate",
+      "params": {"armed": false, "max_speed_mps": 0.12, "max_turn_rps": 0.4, "max_duration_s": 1.5, "min_clearance_m": 0.45, "require_clearance": true, "emergency_stop": false},
+      "pos": [730, 260],
+      "inputs": ["armed", "max_speed_mps", "max_turn_rps", "max_duration_s", "min_clearance_m", "clearance_m", "require_clearance", "emergency_stop"],
+      "outputs": ["authorization", "authorized", "report"],
+      "input_types": {"armed": "Bool", "max_speed_mps": "Float", "max_turn_rps": "Float", "max_duration_s": "Float", "min_clearance_m": "Float", "clearance_m": "Float", "require_clearance": "Bool", "emergency_stop": "Bool"},
+      "output_types": {"authorization": "Dict", "authorized": "Bool", "report": "Text"},
+      "input_defaults": {"armed": false, "max_speed_mps": 0.2, "max_turn_rps": 0.6, "max_duration_s": 1.5, "min_clearance_m": 0.35, "clearance_m": -1.0, "require_clearance": false, "emergency_stop": false}
+    },
+    "explore": {
+      "id": "explore",
+      "type": "ExploreEnvironment",
+      "params": {"action": "start", "run_id": "rosorin-environment", "action_name": "/navigate_to_pose", "map_topic": "/map", "scan_topic": "/scan_raw", "map_frame": "map", "base_frame": "base_link", "cmd_vel_topic": "/cmd_vel", "speed_limit_topic": "/speed_limit", "min_clearance_m": 0.45, "safety_sector_deg": 80.0, "map_stale_after_s": 5.0, "scan_stale_after_s": 1.0, "min_frontier_cells": 8, "obstacle_clearance_m": 0.4, "min_goal_distance_m": 0.5, "no_frontier_timeout_s": 12.0, "goal_timeout_s": 120.0, "session_timeout_s": 1800.0, "max_failed_goals": 8, "save_directory": "/home/ubuntu/Blacknode/maps", "map_name": "environment", "save_map_service": "/slam_toolbox/save_map", "serialize_service": "/slam_toolbox/serialize_map"},
+      "pos": [1080, 180],
+      "inputs": ["trigger", "action", "authorization", "run_id", "action_name", "map_topic", "scan_topic", "map_frame", "base_frame", "cmd_vel_topic", "speed_limit_topic", "min_clearance_m", "safety_sector_deg", "map_stale_after_s", "scan_stale_after_s", "min_frontier_cells", "obstacle_clearance_m", "min_goal_distance_m", "no_frontier_timeout_s", "goal_timeout_s", "session_timeout_s", "max_failed_goals", "save_directory", "map_name", "save_map_service", "serialize_service"],
+      "outputs": ["running", "complete", "ready_for_commands", "progress", "map_artifact", "status", "report"],
+      "input_types": {"trigger": "Any", "action": "Enum", "authorization": "Dict", "run_id": "Text", "action_name": "Text", "map_topic": "Text", "scan_topic": "Text", "map_frame": "Text", "base_frame": "Text", "cmd_vel_topic": "Text", "speed_limit_topic": "Text", "min_clearance_m": "Float", "safety_sector_deg": "Float", "map_stale_after_s": "Float", "scan_stale_after_s": "Float", "min_frontier_cells": "Int", "obstacle_clearance_m": "Float", "min_goal_distance_m": "Float", "no_frontier_timeout_s": "Float", "goal_timeout_s": "Float", "session_timeout_s": "Float", "max_failed_goals": "Int", "save_directory": "Text", "map_name": "Text", "save_map_service": "Text", "serialize_service": "Text"},
+      "output_types": {"running": "Bool", "complete": "Bool", "ready_for_commands": "Bool", "progress": "Dict", "map_artifact": "Dict", "status": "Dict", "report": "Text"},
+      "input_defaults": {"action": "preview", "run_id": "environment", "action_name": "/navigate_to_pose", "map_topic": "/map", "scan_topic": "/scan", "map_frame": "map", "base_frame": "base_link", "cmd_vel_topic": "/cmd_vel", "speed_limit_topic": "/speed_limit", "min_clearance_m": 0.45, "safety_sector_deg": 80.0, "map_stale_after_s": 5.0, "scan_stale_after_s": 1.0, "min_frontier_cells": 8, "obstacle_clearance_m": 0.4, "min_goal_distance_m": 0.5, "no_frontier_timeout_s": 12.0, "goal_timeout_s": 120.0, "session_timeout_s": 1800.0, "max_failed_goals": 8, "save_directory": "~/Blacknode/maps", "map_name": "environment", "save_map_service": "/slam_toolbox/save_map", "serialize_service": "/slam_toolbox/serialize_map"}
+    }
+  },
+  "edges": [
+    {"from": "mapping", "from_port": "provider", "to": "navigation", "to_port": "trigger"},
+    {"from": "navigation", "from_port": "provider", "to": "scan", "to_port": "trigger"},
+    {"from": "scan", "from_port": "clearance_m", "to": "gate", "to_port": "clearance_m"},
+    {"from": "navigation", "from_port": "provider", "to": "explore", "to_port": "trigger"},
+    {"from": "gate", "from_port": "authorization", "to": "explore", "to_port": "authorization"}
+  ]
+}

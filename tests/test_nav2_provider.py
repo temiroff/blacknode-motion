@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,11 @@ _import_nodes_module("blacknode.pkg.blacknode_motion.base.adapters.ros2_nav2", _
 _tag_new_package_nodes(_before, "blacknode-motion", _NODES, "base", "ros2")
 
 from blacknode.pkg.blacknode_motion.base.adapters.ros2_nav2 import nav2
+
+_FRONTIER_SPEC = importlib.util.spec_from_file_location("blacknode_motion_frontier", _NODES / "_frontier.py")
+assert _FRONTIER_SPEC and _FRONTIER_SPEC.loader
+frontier = importlib.util.module_from_spec(_FRONTIER_SPEC)
+_FRONTIER_SPEC.loader.exec_module(frontier)
 
 
 def _runtime(*, nav_ready=True, owned=False):
@@ -38,7 +44,7 @@ def _authorization():
 
 
 def test_nav2_nodes_are_registered_under_base_ros2_adapter():
-    for name in ("NavigationSession", "NavigateTo"):
+    for name in ("NavigationSession", "NavigateTo", "ExploreEnvironment"):
         fn = _NODE_REGISTRY[name]
         assert fn._bn_package == "blacknode-motion"
         assert fn._bn_component == "base"
@@ -66,6 +72,38 @@ def test_managed_navigation_requires_map_and_params(monkeypatch):
     assert result["ready"] is False
     assert "requires map_yaml" in result["report"]
     assert not [call for call in fake.calls if call[0] == "start"]
+
+
+def test_managed_live_slam_navigation_does_not_require_saved_map(monkeypatch, tmp_path):
+    fake = _runtime(nav_ready=False, owned=False)
+    status_calls = {"count": 0}
+
+    def run_ros2(args, timeout=15.0):
+        fake.calls.append(("run", args, timeout))
+        if args == ["action", "list", "-t"]:
+            status_calls["count"] += 1
+            ready = status_calls["count"] > 1
+            return {"ok": True, "backend": "native", "stdout": "/navigate_to_pose [nav2_msgs/action/NavigateToPose]\n" if ready else "", "stderr": ""}
+        return {"ok": True, "backend": "native", "stdout": "", "stderr": ""}
+
+    fake.run_ros2 = run_ros2
+    fake.ros2_managed_status = lambda _run_id: {"ok": True, "running": True, "backend": "native"}
+    monkeypatch.setattr(nav2, "rt", fake)
+    params = tmp_path / "nav2.yaml"
+    params.write_text("navigator:\n  ros__parameters: {}\n", encoding="utf-8")
+
+    result = _NODE_REGISTRY["NavigationSession"]({
+        "action": "start",
+        "lifecycle": "managed",
+        "map_mode": "live_slam",
+        "params_file": str(params),
+        "wait_seconds": 0,
+    })
+
+    launch = [call for call in fake.calls if call[0] == "start"][0][2]
+    assert launch[:3] == ["launch", "nav2_bringup", "navigation_launch.py"]
+    assert not any(argument.startswith("map:=") for argument in launch)
+    assert result["provider"]["map_mode"] == "live_slam"
 
 
 def test_managed_navigation_builds_owned_rosorin_params_overlay(monkeypatch, tmp_path):
@@ -185,6 +223,128 @@ def test_goal_runner_cancels_on_sigterm_and_timeout():
     assert "restored.speed_limit = 0.0" in source
 
 
+def test_exploration_runner_has_freshness_clearance_and_shutdown_safeguards():
+    source = (_NODES / "_frontier_exploration_runner.py").read_text(encoding="utf-8")
+    compile(source, str(_NODES / "_frontier_exploration_runner.py"), "exec")
+    assert "qos_profile_sensor_data" in source
+    assert "map_stale_after" in source
+    assert "scan_stale_after" in source
+    assert "forward_clearance < args.min_clearance" in source
+    assert "cancel_goal_async" in source
+    assert "self.cmd_vel.publish(Twist())" in source
+    assert "Environment mapped. Localization ready. Waiting for command." in source
+
+
+def test_frontier_selector_finds_unknown_boundary_and_respects_exclusions():
+    width = height = 12
+    data = [-1] * (width * height)
+    for row in range(3, 9):
+        for column in range(3, 9):
+            data[row * width + column] = 0
+    selected = frontier.select_frontier_goal(
+        data,
+        width=width,
+        height=height,
+        resolution=0.25,
+        origin_x=-1.5,
+        origin_y=-1.5,
+        origin_yaw=0.0,
+        robot_x=0.0,
+        robot_y=0.0,
+        min_frontier_cells=2,
+        obstacle_clearance_m=0.1,
+        min_goal_distance_m=0.1,
+    )
+
+    assert selected["goal"] is not None
+    assert selected["frontier_cells"] > 0
+    goal = selected["goal"]
+    excluded = frontier.select_frontier_goal(
+        data,
+        width=width,
+        height=height,
+        resolution=0.25,
+        origin_x=-1.5,
+        origin_y=-1.5,
+        origin_yaw=0.0,
+        robot_x=0.0,
+        robot_y=0.0,
+        min_frontier_cells=2,
+        obstacle_clearance_m=0.1,
+        min_goal_distance_m=0.1,
+        excluded_goals=[(goal["x_m"], goal["y_m"])],
+        excluded_radius_m=10.0,
+    )
+    assert excluded["goal"] is None
+
+
+def test_exploration_preview_and_start_are_safety_gated(monkeypatch):
+    fake = _runtime(nav_ready=True)
+    monkeypatch.setattr(nav2, "rt", fake)
+
+    preview = _NODE_REGISTRY["ExploreEnvironment"]({"action": "preview"})
+    blocked = _NODE_REGISTRY["ExploreEnvironment"]({"action": "start", "authorization": {}})
+
+    assert preview["status"]["state"] == "preview"
+    assert preview["status"]["motion_commanded"] is False
+    assert blocked["status"]["state"] == "blocked"
+    assert not [call for call in fake.calls if call[0] == "goal"]
+
+
+def test_exploration_starts_one_managed_inline_worker(monkeypatch):
+    fake = _runtime(nav_ready=True)
+    monkeypatch.setattr(nav2, "rt", fake)
+
+    result = _NODE_REGISTRY["ExploreEnvironment"]({
+        "action": "start",
+        "authorization": _authorization(),
+        "map_name": "office",
+    })
+
+    assert result["running"] is True
+    call = [item for item in fake.calls if item[0] == "goal"][0][1]
+    assert call["source_mode"] == "inline"
+    assert "select_frontier_goal" in call["code"]
+    compile(call["code"], "frontier_exploration_inline.py", "exec")
+    assert "--map-name" in call["arguments"]
+    assert "office" in call["arguments"]
+
+
+def test_exploration_stop_cancels_owned_worker_and_publishes_zero(monkeypatch):
+    fake = _runtime(nav_ready=True, owned=True)
+    monkeypatch.setattr(nav2, "rt", fake)
+
+    result = _NODE_REGISTRY["ExploreEnvironment"]({"action": "stop", "run_id": "office"})
+
+    assert result["status"]["state"] == "stopped"
+    assert any(call[0] == "cancel" for call in fake.calls)
+    assert any(call[0] == "run" and call[1][:3] == ["topic", "pub", "--once"] for call in fake.calls)
+
+
+def test_exploration_status_reports_saved_ready_state(monkeypatch):
+    fake = _runtime(nav_ready=True)
+    ready_event = json.dumps({
+        "kind": "blacknode.exploration-event",
+        "state": "ready",
+        "ready_for_commands": True,
+        "motion_commanded": False,
+        "report": "Environment mapped. Localization ready. Waiting for command.",
+        "coverage": 0.72,
+        "map_artifact": {"kind": "blacknode.map-artifact", "map_yaml": "/maps/office.yaml"},
+    })
+    fake.runtime_status = lambda: {"node_outputs": [{
+        "run_id": "blacknode-explore-environment",
+        "outputs": {"logs": [ready_event]},
+    }]}
+    monkeypatch.setattr(nav2, "rt", fake)
+
+    result = _NODE_REGISTRY["ExploreEnvironment"]({"action": "status"})
+
+    assert result["complete"] is True
+    assert result["ready_for_commands"] is True
+    assert result["map_artifact"]["map_yaml"] == "/maps/office.yaml"
+
+
 def test_rosorin_navigation_template_validates_and_starts_disarmed():
     from blacknode.workflow import validate_workflow
 
@@ -195,3 +355,16 @@ def test_rosorin_navigation_template_validates_and_starts_disarmed():
     assert workflow["node_meta"]["navigate"]["params"]["action"] == "send"
     assert workflow["node_meta"]["gate"]["params"]["armed"] is False
     assert workflow["node_meta"]["navigation"]["params"]["lifecycle"] == "managed"
+
+
+def test_rosorin_familiarization_template_validates_and_starts_disarmed():
+    from blacknode.workflow import validate_workflow
+
+    path = _NODES.parent / "templates" / "rosorin-familiarize-environment.json"
+    workflow = json.loads(path.read_text(encoding="utf-8"))
+    report = validate_workflow(workflow)
+    assert report.ok, report.to_dict()
+    assert workflow["node_meta"]["mapping"]["params"]["action"] == "start"
+    assert workflow["node_meta"]["navigation"]["params"]["map_mode"] == "live_slam"
+    assert workflow["node_meta"]["gate"]["params"]["armed"] is False
+    assert workflow["node_meta"]["explore"]["params"]["action"] == "start"
