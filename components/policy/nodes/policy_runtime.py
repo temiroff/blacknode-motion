@@ -13,6 +13,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Callable
 
+from .deployment import validate_deployment_authorization
 
 
 def _rosbridge_runtime():
@@ -70,7 +71,8 @@ def _robot_joint_specs(robot: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def validate_deployment_contract(
-    artifact: dict[str, Any], robot: dict[str, Any], camera_streams: list[Any], safety: dict[str, Any]
+    artifact: dict[str, Any], robot: dict[str, Any], camera_streams: list[Any],
+    safety: dict[str, Any], authorization: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if artifact.get("kind") != "blacknode.policy-artifact":
         raise ValueError("connect a blacknode.policy-artifact")
@@ -91,16 +93,20 @@ def validate_deployment_contract(
     if not joint_names:
         raise ValueError("policy artifact must declare ordered joints")
     driver = robot.get("driver") if isinstance(robot.get("driver"), dict) else {}
+    physical_authorized = artifact.get("physical_motion_authorized") is not False
     if simulator_delta_policy:
         artifact_safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
-        if (
-            artifact_safety.get("simulation_only") is not True
-            or artifact_safety.get("physical_motion_authorized") is not False
-            or driver.get("simulation_only") is not True
-        ):
+        if artifact_safety.get("simulation_only") is not True or artifact_safety.get("physical_motion_authorized") is not False:
             raise ValueError(
-                "normalized joint-delta policies require a simulation-only artifact and provider"
+                "normalized joint-delta policies require an immutable simulation-only artifact"
             )
+        if driver.get("simulation_only") is True:
+            physical_authorized = False
+        else:
+            validate_deployment_authorization(
+                dict(authorization or {}), artifact, robot, safety
+            )
+            physical_authorized = True
     elif not camera_names:
         raise ValueError("absolute joint-position policy artifact must declare ordered cameras")
     specs = _robot_joint_specs(robot)
@@ -126,9 +132,9 @@ def validate_deployment_contract(
         "joint_names": joint_names,
         "camera_names": camera_names,
         "policy_type": str(artifact.get("policy_type") or ""),
-        "physical_motion_authorized": artifact.get("physical_motion_authorized") is not False,
+        "physical_motion_authorized": physical_authorized,
         "action_mode": action_mode,
-        "simulation_only": simulator_delta_policy,
+        "simulation_only": bool(driver.get("simulation_only")),
         "joint_specs": specs,
         "host": str(robot.get("host") or driver.get("host") or "127.0.0.1"),
         "port": int(robot.get("port") or driver.get("port") or 9090),
@@ -213,6 +219,7 @@ class RosbridgePolicyIO:
         self.safety = safety
         self.lock = threading.RLock()
         self.pose: dict[str, float] = {}
+        self.velocities: dict[str, float] = {}
         self.pose_at = 0.0
         self.workspace: dict[str, float] = {}
         self.workspace_at = 0.0
@@ -228,13 +235,20 @@ class RosbridgePolicyIO:
         )
 
         def on_state(message: dict[str, Any]) -> None:
+            names = [str(name) for name in message.get("name") or []]
             pose = {
                 str(name): float(value)
-                for name, value in zip(message.get("name") or [], message.get("position") or [])
+                for name, value in zip(names, message.get("position") or [])
+                if _finite(value) is not None
+            }
+            velocities = {
+                str(name): float(value)
+                for name, value in zip(names, message.get("velocity") or [])
                 if _finite(value) is not None
             }
             with self.lock:
                 self.pose = pose
+                self.velocities = velocities
                 self.pose_at = time.monotonic()
 
         self.state_subscriber.subscribe(on_state)
@@ -272,6 +286,7 @@ class RosbridgePolicyIO:
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
             pose = dict(self.pose)
+            velocities = dict(self.velocities)
             pose_age = time.monotonic() - self.pose_at if self.pose_at else float("inf")
             workspace = dict(self.workspace)
             workspace_age = time.monotonic() - self.workspace_at if self.workspace_at else float("inf")
@@ -281,7 +296,8 @@ class RosbridgePolicyIO:
         for name, handle in self.cameras.items():
             images[name], camera_ages[name] = self._image(handle, timeout)
         return {
-            "pose": pose, "pose_age": pose_age, "images": images,
+            "pose": pose, "pose_age": pose_age, "joint_velocities": velocities,
+            "images": images,
             "camera_ages": camera_ages, "workspace": workspace, "workspace_age": workspace_age,
         }
 
@@ -532,7 +548,7 @@ def _load_policy(artifact: dict[str, Any], device: str) -> Any:
     if artifact.get("policy_type") == "openpi-pi05" and artifact.get("backend") == "openpi-remote":
         return OpenPIRemotePolicy(artifact, device)
     try:
-        if artifact.get("policy_type") == "ppo-so101-reach":
+        if artifact.get("policy_type") in {"ppo-so101-reach", "ppo-continuous-control-v1"}:
             from blacknode.pkg.blacknode_training.ppo_runtime import PPOPolicy
 
             return PPOPolicy(artifact, device)
@@ -550,6 +566,8 @@ class PolicyRun:
         robot: dict[str, Any],
         camera_streams: list[Any],
         safety: dict[str, Any],
+        authorization: dict[str, Any] | None = None,
+        observation_context: dict[str, Any] | None = None,
         *,
         device: str = "auto",
         policy_loader: Callable[[dict[str, Any], str], Any] = _load_policy,
@@ -559,7 +577,11 @@ class PolicyRun:
         self.artifact = dict(artifact)
         self.robot = dict(robot)
         self.safety = dict(safety)
-        self.contract = validate_deployment_contract(self.artifact, self.robot, camera_streams, self.safety)
+        self.authorization = dict(authorization or {})
+        self.observation_context = dict(observation_context or {})
+        self.contract = validate_deployment_contract(
+            self.artifact, self.robot, camera_streams, self.safety, self.authorization
+        )
         self.cameras = _camera_handles(camera_streams, self.contract["camera_names"])
         self.policy = policy_loader(self.artifact, device)
         self.io = io_factory(self.contract, self.cameras, self.safety)
@@ -662,7 +684,21 @@ class PolicyRun:
         pose = dict(snapshot["pose"])
         qpos = [pose[name] for name in self.contract["joint_names"]]
         started = time.perf_counter()
-        prediction = self.policy.predict(qpos, snapshot["images"], context=snapshot)
+        joint_limits = {
+            name: [
+                math.radians(float(spec.get("safe_min_deg", spec.get("min_deg")))),
+                math.radians(float(spec.get("safe_max_deg", spec.get("max_deg")))),
+            ]
+            for name, spec in self.contract["joint_specs"].items()
+        }
+        policy_context = {**snapshot, **self.observation_context, "joint_limits": joint_limits}
+        if snapshot.get("workspace") and "end_effector_m" not in policy_context:
+            workspace = dict(snapshot["workspace"])
+            if all(axis in workspace for axis in ("x", "y", "z")):
+                policy_context["end_effector_m"] = [
+                    float(workspace[axis]) for axis in ("x", "y", "z")
+                ]
+        prediction = self.policy.predict(qpos, snapshot["images"], context=policy_context)
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         now = time.monotonic()
         dt = now - self.last_command_at if self.last_command_at else 1.0 / max(1.0, float(self.safety.get("loop_hz") or 10.0))
@@ -779,12 +815,18 @@ def start_policy(
     camera_streams: list[Any],
     safety: dict[str, Any],
     device: str,
+    authorization: dict[str, Any] | None = None,
+    observation_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with _lock:
         current = _runs.get(run_id)
         if current and current.thread.is_alive():
             raise RuntimeError(f"policy runtime {run_id!r} is already active")
-        run = PolicyRun(run_id, artifact, robot, camera_streams, safety, device=device)
+        run = PolicyRun(
+            run_id, artifact, robot, camera_streams, safety, authorization,
+            observation_context,
+            device=device,
+        )
         _runs[run_id] = run
     try:
         run.start()

@@ -18,7 +18,7 @@ _import_nodes_module("blacknode.pkg.blacknode_motion.policy", _POLICY_NODES)
 _import_nodes_module("blacknode.pkg.blacknode_motion.policy.adapters.ros2", _ADAPTER_NODES)
 _tag_new_package_nodes(_before, "blacknode-motion", _ADAPTER_NODES, "policy", "ros2")
 
-from blacknode.pkg.blacknode_motion.policy import policy_runtime
+from blacknode.pkg.blacknode_motion.policy import deployment, policy_runtime
 
 
 def _artifact() -> dict:
@@ -75,7 +75,10 @@ def _safety(tmp_path: Path | None = None) -> dict:
 def test_policy_nodes_are_registered_and_disarmed_by_default():
     assert "PolicySafetyGate" in _NODE_REGISTRY
     assert "PolicyRuntime" in _NODE_REGISTRY
+    assert "PolicyDeploymentAuthorize" in _NODE_REGISTRY
     assert _NODE_REGISTRY["PolicyRuntime"]._bn_input_defaults["action"] == "status"
+    assert _NODE_REGISTRY["PolicyDeploymentAuthorize"]._bn_input_defaults["action"] == "check"
+    assert _NODE_REGISTRY["PolicyDeploymentAuthorize"]._bn_input_defaults["authorize_physical_motion"] is False
 
 
 def test_contract_requires_calibration_and_exact_camera_and_joint_order():
@@ -87,7 +90,7 @@ def test_contract_requires_calibration_and_exact_camera_and_joint_order():
         policy_runtime.validate_deployment_contract(_artifact(), _robot(), [], _safety())
 
 
-def test_normalized_delta_policy_is_accepted_only_for_simulation_provider():
+def test_normalized_delta_policy_requires_qualification_bound_authorization_for_hardware():
     simulator = _robot()
     simulator["driver"]["simulation_only"] = True
     contract = policy_runtime.validate_deployment_contract(
@@ -95,9 +98,44 @@ def test_normalized_delta_policy_is_accepted_only_for_simulation_provider():
     )
     assert contract["simulation_only"]
     assert contract["camera_names"] == []
-    with pytest.raises(ValueError, match="simulation-only"):
+    with pytest.raises(ValueError, match="deployment authorization"):
         policy_runtime.validate_deployment_contract(
             _ppo_artifact(), _robot(), [], _safety()
+        )
+
+    artifact = {**_ppo_artifact(), "artifact_digest": "a" * 64}
+    qualification = {
+        "kind": "blacknode.policy-qualification", "schema_version": 1,
+        "artifact_digest": artifact["artifact_digest"], "passed": True,
+        "thresholds": {}, "evaluations": [], "failures": [],
+        "safety": {"simulation_only": True, "physical_motion_authorized": False},
+    }
+    qualification["qualification_digest"] = deployment.qualification_digest(qualification)
+    authorization = deployment.create_deployment_authorization(
+        artifact, qualification, _robot(), _safety()
+    )
+    blocked = _NODE_REGISTRY["PolicyDeploymentAuthorize"]({
+        "action": "authorize", "artifact": artifact, "qualification": qualification,
+        "robot": _robot(), "safety": _safety(),
+    })
+    assert not blocked["authorized"]
+    approved = _NODE_REGISTRY["PolicyDeploymentAuthorize"]({
+        "action": "authorize", "authorize_physical_motion": True,
+        "artifact": artifact, "qualification": qualification,
+        "robot": _robot(), "safety": _safety(),
+    })
+    assert approved["authorized"]
+    assert approved["authorization"]["starts_disarmed"]
+    contract = policy_runtime.validate_deployment_contract(
+        artifact, _robot(), [], _safety(), authorization
+    )
+    assert contract["physical_motion_authorized"]
+    assert not contract["simulation_only"]
+
+    tampered_safety = {**_safety(), "max_step_deg": 5.0}
+    with pytest.raises(ValueError, match="different safety"):
+        policy_runtime.validate_deployment_contract(
+            artifact, _robot(), [], tampered_safety, authorization
         )
 
 

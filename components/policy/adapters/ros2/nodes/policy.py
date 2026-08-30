@@ -83,6 +83,8 @@ def policy_safety_gate(ctx: dict) -> dict:
         "action": Enum(["status", "check", "start", "arm", "disarm", "estop", "reset_estop", "takeover", "reset_takeover", "stop"], default="status"),
         "run_id": Text(default="so_arm101_policy"),
         "artifact": Dict(default={}),
+        "authorization": Dict(default={}),
+        "observation_context": Dict(default={}),
         "robot": Dict(default={}),
         "camera_streams": List(default=[]),
         "safety": Dict(default={}),
@@ -93,7 +95,7 @@ def policy_safety_gate(ctx: dict) -> dict:
         "human_takeover": Bool, "phase": Text, "prediction": Dict, "action": Dict,
         "clamped": List, "metrics": Dict, "dashboard": Image, "log_path": Text, "report": Text,
     },
-    primary_inputs=["trigger", "artifact", "robot", "camera_streams", "safety"],
+    primary_inputs=["trigger", "artifact", "authorization", "observation_context", "robot", "camera_streams", "safety"],
     primary_outputs=["dashboard", "metrics", "report"],
 )
 def policy_runtime_node(ctx: dict) -> dict:
@@ -106,13 +108,15 @@ def policy_runtime_node(ctx: dict) -> dict:
             contract = policy_runtime.validate_deployment_contract(
                 dict(ctx.get("artifact") or {}), dict(ctx.get("robot") or {}),
                 list(ctx.get("camera_streams") or []), dict(ctx.get("safety") or {}),
+                dict(ctx.get("authorization") or {}),
             )
             status = {**policy_runtime.policy_status(run_id), "phase": "ready", "joint_names": contract["joint_names"], "camera_names": contract["camera_names"]}
         elif action == "start":
             status = policy_runtime.start_policy(
                 run_id, dict(ctx.get("artifact") or {}), dict(ctx.get("robot") or {}),
                 list(ctx.get("camera_streams") or []), dict(ctx.get("safety") or {}),
-                str(ctx.get("device") or "auto"),
+                str(ctx.get("device") or "auto"), dict(ctx.get("authorization") or {}),
+                dict(ctx.get("observation_context") or {}),
             )
         else:
             status = policy_runtime.control_policy(run_id, action)

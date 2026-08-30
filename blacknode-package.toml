@@ -1,6 +1,6 @@
 [package]
 name = "blacknode-motion"
-version = "0.6.3"
+version = "0.7.0"
 description = "Arm and base planning, trajectory generation, execution, policy, arbitration, and motion safety for Blacknode."
 requires-blacknode = ">=0.3.0"
 layer = "motion"
