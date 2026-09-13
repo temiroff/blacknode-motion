@@ -73,6 +73,7 @@ def _open_provider_session(ctx: Mapping[str, Any]) -> tuple[Any, dict[str, Any]]
                 "component": binding["component"],
                 "capability": str(provider.get("capability") or "joint_group"),
                 "bound_via": binding["capability"],
+                "supports_position_targets": provider.get("supports_position_targets") is True,
             }
     raise RuntimeError(
         "joint motion provider is unavailable for "
@@ -129,7 +130,11 @@ def arm_servo_motion(run_id: str, ctx: Mapping[str, Any]) -> dict[str, Any]:
     hardware_id, _calibration = _validate_calibration(ctx)
     joints = _joint_specs(profile)
     session, provider = _open_provider_session(ctx)
+    position_target_mode = ctx.get("position_target_mode") is True
     try:
+        if position_target_mode and (not provider.get("supports_position_targets")
+                                     or not callable(getattr(session, "command_position_target", None))):
+            raise ValueError("The selected provider does not support bounded position targets")
         before = dict(session.sample() or {})
         error = _sample_error(before)
         pose = dict(before.get("pose") or {})
@@ -163,6 +168,7 @@ def arm_servo_motion(run_id: str, ctx: Mapping[str, Any]) -> dict[str, Any]:
         "robot_id": str(ctx.get("robot_id") or ""),
         "provider": provider,
         "last_command_at": time.monotonic(),
+        "position_target_mode": position_target_mode,
         "sample": held,
     }
     with _SESSION_LOCK:
@@ -230,18 +236,21 @@ def command_servo_motion(run_id: str, command: Mapping[str, Any]) -> dict[str, A
         current_rad = {name: math.radians(float(value)) for name, value in pose_deg.items()}
         elapsed = max(0.001, time.monotonic() - float(item["last_command_at"]))
         velocity_deg = float(spec.get("velocity_limit") or 0.0)
+        position_target_mode = item.get("position_target_mode") is True
+        if position_target_mode and (not math.isfinite(velocity_deg) or velocity_deg <= 0):
+            return blocked("position tracking requires a finite positive driver velocity limit")
 
         def publish(safe_target: dict[str, float]) -> Mapping[str, Any]:
             degrees = {
                 name: math.degrees(value)
                 for name, value in safe_target.items()
             }
-            result = dict(
-                item["session"].command(
-                    degrees,
-                    deadline=time.monotonic() + 0.5,
-                ) or {}
-            )
+            if position_target_mode:
+                result = dict(item["session"].command_position_target(
+                    degrees, max_velocity_deg_s=velocity_deg, deadline=time.monotonic() + 0.5,
+                ) or {})
+            else:
+                result = dict(item["session"].command(degrees, deadline=time.monotonic() + 0.5) or {})
             provider_error = _sample_error(result)
             if provider_error or result.get("torque_enabled") is not True:
                 return {"ok": False, "error": provider_error or "torque verification failed"}
@@ -259,7 +268,7 @@ def command_servo_motion(run_id: str, command: Mapping[str, Any]) -> dict[str, A
             feedback_age=0.0,
             max_velocity=(
                 math.radians(velocity_deg)
-                if velocity_deg > 0.0
+                if velocity_deg > 0.0 and not position_target_mode
                 else math.inf
             ),
             interval=elapsed,

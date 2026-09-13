@@ -25,6 +25,14 @@
 
 Applications and skills submit requests through the motion gateway. The gateway applies ownership, freshness, limits, and authorization before a profile-selected driver receives a command.
 
+Servo contexts may request `position_target_mode: true` from providers declaring
+`supports_position_targets`. Their session must implement
+`command_position_target(positions_deg, max_velocity_deg_s=..., deadline=...)`
+and enforce the finite profile speed ceiling in its position controller. The
+gateway forwards each calibrated target directly through arbitration while
+retaining health, freshness, ownership and shutdown checks. Providers using the
+regular command path retain software velocity limiting.
+
 ## Safety
 
 - Motion is disarmed by default.
