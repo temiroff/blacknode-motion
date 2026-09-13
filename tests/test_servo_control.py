@@ -14,6 +14,7 @@ class FakeMotionSession:
         self.armed = False
         self.closed = False
         self.commands = []
+        self.direct_speeds = []
 
     def sample(self):
         return {
@@ -33,6 +34,10 @@ class FakeMotionSession:
         self.commands.append(dict(positions_deg))
         self.pose.update(positions_deg)
         return self.sample()
+
+    def command_position_target(self, positions_deg, *, max_velocity_deg_s, deadline):
+        self.direct_speeds.append(max_velocity_deg_s)
+        return self.command(positions_deg, deadline=deadline)
 
     def release(self):
         self.armed = False
@@ -126,6 +131,38 @@ def test_servo_motion_arms_at_feedback_and_commands_one_joint(motion_provider):
     assert disarmed["ok"] is True
     assert session.armed is False
     assert session.closed is True
+
+
+def test_position_tracking_sends_full_bounded_target_to_capable_provider(motion_provider):
+    provider = _NODE_REGISTRY["_TestServoMotionProvider"]._bn_robot_joint_motion_provider
+    provider["supports_position_targets"] = True
+    ctx = _context()
+    ctx["position_target_mode"] = True
+    for joint in ctx["profile"]["joints"]:
+        joint["velocity_limit"] = 180
+    assert servo_control.arm_servo_motion("direct", ctx)["armed"]
+    result = servo_control.command_servo_motion("direct", {
+        "kind": "blacknode.joint-command-request", "schema_version": 1,
+        "joint_name": "shoulder", "position_rad": 10, "issued_at": time.time(),
+        "requires_motion_authorization": True,
+    })
+    assert result["ok"] and result["clamped"]
+    assert motion_provider[0].commands == [{"shoulder": 90.0}]
+    assert motion_provider[0].direct_speeds == [180]
+    stale = servo_control.command_servo_motion("direct", {
+        "kind": "blacknode.joint-command-request", "schema_version": 1,
+        "joint_name": "shoulder", "position_rad": 0, "issued_at": time.time() - 2,
+        "requires_motion_authorization": True,
+    })
+    assert not stale["ok"] and not motion_provider[0].armed
+    assert len(motion_provider[0].commands) == 1
+
+
+def test_position_tracking_requires_provider_capability_before_hold(motion_provider):
+    ctx = {**_context(), "position_target_mode": True}
+    with pytest.raises(ValueError, match="does not support"):
+        servo_control.arm_servo_motion("direct", ctx)
+    assert not motion_provider[0].armed and motion_provider[0].closed
 
 
 def test_servo_motion_rejects_stale_command_without_writing(motion_provider):
